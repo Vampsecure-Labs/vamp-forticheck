@@ -1,0 +1,44 @@
+# Entorno virtual Python — nunca commitear
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Ficheros de salida de auditoría — pueden contener datos de clientes
+report_*.json
+report_*.html
+results_*.json
+*.report.json
+*.report.html
+
+# Fichero de scope — contiene IPs/dominios de clientes reales
+scope.txt
+scope-*.txt
+targets.txt
+targets-*.txt
+
+# Secretos y credenciales — NUNCA en el repo
+.env*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+.rotated-secrets.txt
+secrets/
+
+# Scripts de bootstrap con credenciales inline — NUNCA en el repo
+nexus_tasks.sh
+bootstrap_*.sh
+
+# Temporales y sistema
+.DS_Store
+*.log
+*.tmp
+.idea/
+.vscode/
+*.swp
+*~
