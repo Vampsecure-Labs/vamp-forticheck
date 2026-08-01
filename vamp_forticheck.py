@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """
-vamp_forticheck.py — Escáner de Vulnerabilidades y Exposición FortiOS
-=======================================================================
+vamp_forticheck.py — Escáner de Vulnerabilidades Multi-Vendor Edge Devices
+===========================================================================
 VampSecure Labs · VampSecure Studios
-Para Uso Exclusivo en Pruebas de Penetración Autorizadas — v1.0
+Para Uso Exclusivo en Pruebas de Penetración Autorizadas — v2.0
 
 DESCRIPCIÓN GENERAL
 -------------------
 Herramienta de auditoría de seguridad de alto rendimiento para dispositivos
-Fortinet que ejecutan FortiOS (cortafuegos FortiGate, gateway SSL-VPN, interfaz
-de administración web). Confirma la exposición real a CVEs críticos mediante
-sondas pasivas y semi-activas, sin comprometer la integridad del servicio objetivo.
+de seguridad perimetral de red. A partir de v2.0 cubre seis fabricantes:
+  · Fortinet  FortiOS      — FortiGate / SSL-VPN / Admin UI
+  · Palo Alto PAN-OS       — GlobalProtect / Panorama
+  · Cisco     ASA          — WebVPN / ASDM
+  · Cisco     IOS-XE       — Web UI (RESTCONF/NETCONF)
+  · Check Point            — Security Gateway / SmartConsole
+  · Juniper   Junos / JWeb — SRX / EX
+
+Confirma la exposición real a CVEs críticos mediante detección de fabricante,
+sondas específicas por plataforma y correlación por versión, sin comprometer
+la integridad del servicio objetivo.
 
 ARQUITECTURA DE EJECUCIÓN (3 fases por objetivo)
 -------------------------------------------------
@@ -91,8 +99,8 @@ BANNER = r"""
   \ V / (_| | / _ \ | |\/| | |_) \___ \| |___| | | | |_) |  _|   | |     / _ \ |  _ \___ \
    | |  \__, |/ ___ \| |  | |  __/ ___) |___  | |_| |  _ <| |___  | |___ / ___ \| |_) |__) |
    |_|     /_/_/   \_|_|  |_|_|   |____/\____|\___/|_| \_|_____| |_____/_/   \_|____/____/
-     by VampSecure Studios · vamp-forticheck v1.3 · FortiOS Vulnerability Scanner
-     ──────────────────────────────────────────────────────────────────────────────
+     by VampSecure Studios · vamp-forticheck v2.0 · Multi-Vendor Edge Device Scanner
+     ─────────────────────────────────────────────────────────────────────────────────
      USO EXCLUSIVO EN AUDITORÍAS AUTORIZADAS · El uso no autorizado es ilegal
 """
 
@@ -163,6 +171,153 @@ FORTIOS_CVE_DB: Dict = {
 }
 
 # =============================================================================
+# BASES DE DATOS CVE — FABRICANTES ADICIONALES (v2.0)
+# =============================================================================
+# Estructura idéntica a FORTIOS_CVE_DB para procesamiento uniforme.
+# Cada vendor tiene su propia clave de diccionario de nivel superior.
+# =============================================================================
+
+PANOS_CVE_DB: Dict = {
+    "CVE-2024-3400": {
+        "description": "Palo Alto PAN-OS GlobalProtect — inyección de comandos OS pre-autenticada en el gateway GlobalProtect; explotación activa confirmada en la naturaleza (CVSS 10.0)",
+        "cvss": 10.0,
+        "severity": "CRITICAL",
+        "component": "GlobalProtect Gateway",
+        "affected_versions": [
+            # PAN-OS 10.2.x < 10.2.9-h1 → representado como (10,2,0)–(10,2,8)
+            ((10, 2, 0), (10, 2, 8)),
+            ((11, 0, 0), (11, 0, 3)),
+            ((11, 1, 0), (11, 1, 1)),
+        ],
+        "mitigation": "Actualizar a PAN-OS 10.2.9-h1 / 11.0.4-h1 / 11.1.2-h3 o superior; deshabilitar GlobalProtect temporalmente",
+    },
+    "CVE-2024-0012": {
+        "description": "Palo Alto PAN-OS — bypass de autenticación en la interfaz web de administración (PAN-SA-2024-0015); permite acceso sin credenciales a la consola de gestión",
+        "cvss": 9.8,
+        "severity": "CRITICAL",
+        "component": "Management Web Interface",
+        "affected_versions": [
+            ((10, 1, 0), (10, 1, 11)),
+            ((10, 2, 0), (10, 2, 12)),
+            ((11, 0, 0), (11, 0, 5)),
+            ((11, 1, 0), (11, 1, 4)),
+            ((11, 2, 0), (11, 2, 3)),
+        ],
+        "mitigation": "Actualizar a PAN-OS 10.1.12 / 10.2.13 / 11.0.6 / 11.1.5 / 11.2.4 o superior; restringir acceso a la interfaz de gestión por IP",
+    },
+    "CVE-2020-2021": {
+        "description": "Palo Alto PAN-OS — bypass de autenticación vía respuesta SAML manipulada; afecta cuando SAML SSO está habilitado; CVSS 10.0",
+        "cvss": 10.0,
+        "severity": "CRITICAL",
+        "component": "SAML Authentication",
+        "affected_versions": [
+            ((8, 1, 0), (8, 1, 14)),
+            ((9, 0, 0), (9, 0, 9)),
+            ((9, 1, 0), (9, 1, 3)),
+            ((10, 0, 0), (10, 0, 0)),
+        ],
+        "mitigation": "Actualizar a PAN-OS 8.1.15 / 9.0.9 / 9.1.4 / 10.0.1 o superior; deshabilitar SAML SSO si no es necesario",
+    },
+}
+
+CISCO_CVE_DB: Dict = {
+    "CVE-2023-20198": {
+        "description": "Cisco IOS XE Web UI — escalada de privilegios a nivel 15 sin autenticación a través de la interfaz de gestión HTTP; explotación masiva activa en la naturaleza (CVSS 10.0)",
+        "cvss": 10.0,
+        "severity": "CRITICAL",
+        "component": "IOS XE Web UI",
+        "affected_versions": [
+            # IOS-XE hasta 17.9 (sin versión de patch específica → representar rango amplio)
+            ((16, 0, 0), (17, 9, 99)),
+        ],
+        "mitigation": "Deshabilitar la interfaz HTTP/HTTPS de gestión (no ip http server / no ip http secure-server); actualizar a versión con parche cuando esté disponible",
+    },
+    "CVE-2023-20273": {
+        "description": "Cisco IOS XE Web UI — inyección de comandos OS para usuarios previamente escalados vía CVE-2023-20198; permite instalación de implante persistente",
+        "cvss": 7.2,
+        "severity": "HIGH",
+        "component": "IOS XE Web UI",
+        "affected_versions": [
+            ((16, 0, 0), (17, 9, 99)),
+        ],
+        "mitigation": "Misma mitigación que CVE-2023-20198: deshabilitar gestión HTTP/HTTPS",
+    },
+    "CVE-2023-20269": {
+        "description": "Cisco ASA/FTD — acceso no autorizado a sesiones VPN SSL activas; permite establecer sesión VPN sin credenciales si AAA está en el mismo servidor que AnyConnect",
+        "cvss": 9.1,
+        "severity": "CRITICAL",
+        "component": "ASA SSL VPN / FTD AnyConnect",
+        "affected_versions": [
+            ((9, 0, 0), (9, 18, 3)),
+            ((9, 19, 0), (9, 19, 1)),
+        ],
+        "mitigation": "Actualizar a ASA 9.16.4-67 / 9.18.4 / 9.19.2 o superior; separar AAA para VPN y administración",
+    },
+    "CVE-2024-20353": {
+        "description": "Cisco ASA/FTD — denegación de servicio (DoS) mediante paquetes HTTPS malformados en el procesador WebVPN; puede causar recarga del dispositivo",
+        "cvss": 8.6,
+        "severity": "HIGH",
+        "component": "ASA WebVPN / FTD",
+        "affected_versions": [
+            ((9, 0, 0), (9, 18, 3)),
+        ],
+        "mitigation": "Actualizar a versión con parche; aplicar ACLs para limitar acceso al portal WebVPN",
+    },
+}
+
+CHECKPOINT_CVE_DB: Dict = {
+    "CVE-2024-24919": {
+        "description": "Check Point Security Gateway — divulgación de información mediante traversal de ruta en el endpoint /clients/MyCRL; permite leer ficheros arbitrarios del sistema incluido /etc/shadow (explotación activa confirmada)",
+        "cvss": 8.6,
+        "severity": "HIGH",
+        "component": "Security Gateway (IPSec VPN / Mobile Access)",
+        "affected_versions": [
+            # Versiones R80.x y R81.x — representadas como (80,0)–(81,20)
+            ((80, 0, 0), (81, 20, 99)),
+        ],
+        "mitigation": "Aplicar hotfix del SA de mayo 2024 inmediatamente; deshabilitar Mobile Access y SSL VPN hasta aplicar el parche",
+    },
+}
+
+JUNIPER_CVE_DB: Dict = {
+    "CVE-2024-21591": {
+        "description": "Juniper Networks Junos OS — escritura fuera de límites en J-Web permite RCE pre-autenticado o DoS; afecta EX Series y SRX Series",
+        "cvss": 9.8,
+        "severity": "CRITICAL",
+        "component": "J-Web",
+        "affected_versions": [
+            ((20, 0, 0), (20, 4, 99)),
+            ((21, 0, 0), (21, 4, 99)),
+            ((22, 0, 0), (22, 4, 2)),
+            ((23, 0, 0), (23, 2, 0)),
+        ],
+        "mitigation": "Actualizar a Junos OS 20.4R3-S9 / 21.4R3-S7 / 22.4R3 / 23.2R1 o superior; deshabilitar J-Web si no es necesario",
+    },
+    "CVE-2023-36845": {
+        "description": "Juniper Networks Junos OS EX/SRX — modificación de variable PHP externa en J-Web permite ejecución remota de código sin autenticación (parte del 'EX Series Quartet')",
+        "cvss": 9.8,
+        "severity": "CRITICAL",
+        "component": "J-Web (PHP)",
+        "affected_versions": [
+            ((20, 4, 0), (20, 4, 99)),
+            ((21, 0, 0), (21, 4, 99)),
+            ((22, 0, 0), (22, 4, 0)),
+        ],
+        "mitigation": "Actualizar a Junos OS 20.4R3-S8 / 21.4R3-S4 / 22.4R3 o superior; aplicar ACLs para restringir acceso a J-Web",
+    },
+}
+
+# Mapa global de CVE databases por vendor (excluye Fortinet que usa FORTIOS_CVE_DB)
+VENDOR_CVE_MAP: Dict[str, Dict] = {
+    "PAN-OS":        PANOS_CVE_DB,
+    "Cisco-IOS-XE":  CISCO_CVE_DB,
+    "Cisco-ASA":     CISCO_CVE_DB,
+    "Check-Point":   CHECKPOINT_CVE_DB,
+    "Juniper":       JUNIPER_CVE_DB,
+}
+
+
+# =============================================================================
 # MODELO DE DATOS
 # =============================================================================
 
@@ -196,6 +351,8 @@ class ScanResult:
     risk_score: float = 0.0
     risk_level: str = "UNKNOWN"
     error: Optional[str] = None
+    # v2.0 — fabricante detectado: FortiOS / PAN-OS / Cisco-ASA / Cisco-IOS-XE / Check-Point / Juniper / Unknown
+    vendor: Optional[str] = None
 
 
 # =============================================================================
@@ -373,7 +530,283 @@ class VersionDetector:
 
 
 # =============================================================================
-# VERIFICADOR DE CVEs
+# DETECTOR DE FABRICANTE (MULTI-VENDOR) — v2.0
+# =============================================================================
+
+class VendorDetector:
+    """
+    Detecta el fabricante del dispositivo de seguridad de red a partir del
+    contenido HTML y las cabeceras HTTP de la respuesta inicial.
+
+    Cubre seis plataformas principales de seguridad perimetral:
+      · FortiOS    (Fortinet FortiGate)
+      · PAN-OS     (Palo Alto Networks)
+      · Cisco-ASA  (Cisco Adaptive Security Appliance)
+      · Cisco-IOS-XE (Cisco routers/switches con Web UI)
+      · Check-Point (Check Point Security Gateway)
+      · Juniper    (Juniper Networks Junos OS / J-Web)
+
+    El método devuelve la primera coincidencia por orden de especificidad
+    (FortiOS primero por retrocompatibilidad con v1.x del escáner).
+    """
+
+    # Indicadores por fabricante — cadenas características en HTML/cabeceras
+    _VENDOR_INDICATORS: Dict[str, List[str]] = {
+        "FortiOS": [
+            "fgt_lang", "sslvpn", "FortiGate", "fortinet", "FortiNet",
+            "SSL-VPN", "fgt-gui", "/remote/",
+        ],
+        "PAN-OS": [
+            "GlobalProtect", "PAN-OS", "Palo Alto Networks", "pan_form_auth",
+            "gp-translate-login", "login_page_token", "gpclientcert",
+            "global-protect",
+        ],
+        "Cisco-ASA": [
+            "CSCOE", "Cisco Adaptive Security", "WebVPN", "clientless ssl vpn",
+            "SSL VPN Service", "Cisco ASA", "+CSCOE+",
+        ],
+        "Cisco-IOS-XE": [
+            "Cisco IOS XE", "IOS-XE", "IOSXEWebUI", "webui-nginx",
+            "cisco ios xe software",
+        ],
+        "Check-Point": [
+            "Check Point", "SmartConsole", "cpanel", "MyCRL",
+            "Capsule", "Check Point Security Gateway",
+        ],
+        "Juniper": [
+            "Juniper Networks", "Junos", "J-Web", "JUNOS",
+            "Juniper SRX", "Juniper EX",
+        ],
+    }
+
+    @classmethod
+    def detect(cls, content: str, headers: Dict) -> Optional[str]:
+        """
+        Detecta el fabricante analizando HTML + cabeceras HTTP.
+
+        Retorna el nombre del fabricante detectado o None si no se reconoce.
+        """
+        combined = (content + str(headers)).lower()
+        for vendor, indicators in cls._VENDOR_INDICATORS.items():
+            if any(ind.lower() in combined for ind in indicators):
+                return vendor
+        return None
+
+
+# =============================================================================
+# VERIFICADOR CVE MULTI-VENDOR — v2.0
+# =============================================================================
+
+class MultiVendorCVEChecker:
+    """
+    Realiza sondas de red específicas para CVEs de dispositivos no-Fortinet.
+
+    Cubre PAN-OS, Cisco ASA/IOS-XE, Check Point y Juniper con el mismo
+    principio de diseño que CVEChecker (FortiOS): sondas no destructivas,
+    evidencia sin explotación real.
+
+    Para CVEs con confirmación por versión (la mayoría de heap overflows y
+    corrupciones de memoria), usa version_match igual que el checker de FortiOS.
+    """
+
+    def __init__(self, session: aiohttp.ClientSession, timeout: int = 10):
+        self.session = session
+        self.to = aiohttp.ClientTimeout(total=timeout)
+
+    async def check_panos_globalprotect_exposure(self, base_url: str) -> Dict:
+        """
+        Verifica si el gateway GlobalProtect de PAN-OS está expuesto.
+        La exposición de GlobalProtect amplifica el riesgo de CVE-2024-3400.
+        Una respuesta 200 en /global-protect/ confirma el vector de ataque.
+        """
+        resultado = {
+            "cve": "PAN-GLOBALPROTECT-EXPOSURE",
+            "confirmed": False,
+            "method": "active_probe",
+            "evidence": None,
+            "impact": "Gateway GlobalProtect expuesto — superficie de ataque para CVE-2024-3400 y CVE-2021-3064",
+            "severity": "MEDIUM",
+            "cvss": 5.3,
+            "description": "Portal GlobalProtect accesible públicamente",
+        }
+        for ruta in ("/global-protect/getsoftware.esp", "/ssl-vpn/hipreport.esp", "/global-protect/"):
+            try:
+                async with self.session.get(
+                    f"{base_url}{ruta}",
+                    timeout=self.to,
+                    allow_redirects=False,
+                    ssl=False,
+                ) as r:
+                    if r.status in (200, 301, 302):
+                        resultado["confirmed"] = True
+                        resultado["evidence"] = f"HTTP {r.status} en {ruta} — GlobalProtect expuesto"
+                        return resultado
+            except Exception:
+                pass
+        return resultado
+
+    async def check_checkpoint_cve_2024_24919(self, base_url: str) -> Dict:
+        """
+        Sonda el traversal de ruta CVE-2024-24919 (Check Point).
+
+        Método de prueba seguro:
+        Envía POST a /clients/MyCRL con un path de traversal hacia /etc/hostname
+        (fichero público que NO contiene credenciales). Si la respuesta contiene
+        el hostname del sistema, el traversal es real. Un sistema parcheado
+        devuelve 403/404 o el contenido del endpoint esperado.
+        """
+        resultado = {
+            "cve": "CVE-2024-24919",
+            "confirmed": False,
+            "method": "active_probe",
+            "evidence": None,
+            "impact": None,
+            "severity": "HIGH",
+            "cvss": 8.6,
+            "description": CHECKPOINT_CVE_DB["CVE-2024-24919"]["description"],
+        }
+        try:
+            async with self.session.post(
+                f"{base_url}/clients/MyCRL",
+                data="aCSHELL/../../../../../../../etc/hostname",
+                headers={"Content-Type": "text/plain"},
+                timeout=self.to,
+                allow_redirects=False,
+                ssl=False,
+            ) as r:
+                if r.status == 200:
+                    cuerpo = await r.text(errors="replace")
+                    # Un hostname del sistema tiene 1-63 caracteres alfanuméricos
+                    # El endpoint normal debería devolver XML o binario, no un hostname plano
+                    lineas = [l.strip() for l in cuerpo.splitlines() if l.strip()]
+                    if lineas and len(lineas[0]) <= 63 and re.match(r'^[a-zA-Z0-9\-]+$', lineas[0]):
+                        resultado["confirmed"] = True
+                        resultado["evidence"] = (
+                            f"POST /clients/MyCRL respondió HTTP 200 con contenido de texto "
+                            f"que parece un hostname del sistema — traversal de ruta confirmado"
+                        )
+                        resultado["impact"] = (
+                            "Lectura arbitraria de ficheros del sistema incluido /etc/shadow; "
+                            "credenciales del sistema operativo en riesgo"
+                        )
+                    else:
+                        resultado["evidence"] = f"HTTP 200 con cuerpo inesperado — revisión manual recomendada"
+                elif r.status in (403, 404):
+                    resultado["evidence"] = f"HTTP {r.status} — endpoint protegido o parcheado"
+                else:
+                    resultado["evidence"] = f"HTTP {r.status}"
+        except asyncio.TimeoutError:
+            resultado["evidence"] = "Timeout"
+        except Exception as e:
+            resultado["evidence"] = f"Error: {str(e)[:60]}"
+
+        return resultado
+
+    async def check_cisco_iosxe_webui_exposed(self, base_url: str) -> Dict:
+        """
+        Verifica si la interfaz de gestión Web UI de Cisco IOS-XE está expuesta.
+        Si /webui/ responde con contenido IOS-XE, existe superficie de ataque
+        para CVE-2023-20198 (privilege escalation) y CVE-2023-20273 (RCE).
+        """
+        resultado = {
+            "cve": "CISCO-IOSXE-WEBUI-EXPOSURE",
+            "confirmed": False,
+            "method": "active_probe",
+            "evidence": None,
+            "impact": "Web UI IOS-XE expuesta — superficie de ataque para CVE-2023-20198 (CVSS 10.0)",
+            "severity": "HIGH",
+            "cvss": 7.5,
+            "description": "Interfaz de gestión Web UI Cisco IOS-XE accesible",
+        }
+        try:
+            async with self.session.get(
+                f"{base_url}/webui/",
+                timeout=self.to,
+                allow_redirects=True,
+                ssl=False,
+            ) as r:
+                if r.status == 200:
+                    cuerpo = await r.text(errors="replace")
+                    if any(kw in cuerpo.lower() for kw in ("cisco", "iosxe", "ios xe", "webui")):
+                        resultado["confirmed"] = True
+                        resultado["evidence"] = "HTTP 200 en /webui/ con contenido Cisco IOS-XE"
+        except Exception:
+            pass
+        return resultado
+
+    async def check_cisco_asa_vpn_exposed(self, base_url: str) -> Dict:
+        """
+        Verifica si el portal WebVPN de Cisco ASA está expuesto.
+        La exposición amplifica el riesgo de CVE-2023-20269 (unauthorized VPN sessions).
+        """
+        resultado = {
+            "cve": "CISCO-ASA-WEBVPN-EXPOSURE",
+            "confirmed": False,
+            "method": "active_probe",
+            "evidence": None,
+            "impact": "Portal WebVPN ASA expuesto — superficie de ataque para CVE-2023-20269",
+            "severity": "MEDIUM",
+            "cvss": 5.3,
+            "description": "Portal WebVPN Cisco ASA accesible públicamente",
+        }
+        for ruta in ("/+CSCOE+/logon.html", "/remote/logon", "/vpn/"):
+            try:
+                async with self.session.get(
+                    f"{base_url}{ruta}",
+                    timeout=self.to,
+                    allow_redirects=False,
+                    ssl=False,
+                ) as r:
+                    if r.status in (200, 301, 302):
+                        resultado["confirmed"] = True
+                        resultado["evidence"] = f"HTTP {r.status} en {ruta} — portal WebVPN expuesto"
+                        return resultado
+            except Exception:
+                pass
+        return resultado
+
+    def check_version_cves_vendor(
+        self,
+        vendor: str,
+        version: Optional[str],
+    ) -> List[Dict]:
+        """
+        Mapea la versión detectada a CVEs conocidos para el fabricante dado,
+        sin sondas de red adicionales. Igual que CVEChecker.check_version_cves
+        pero para fabricantes no-Fortinet.
+        """
+        if not version or vendor not in VENDOR_CVE_MAP:
+            return []
+        cve_db = VENDOR_CVE_MAP[vendor]
+        resultados: List[Dict] = []
+        tupla_ver = VersionDetector.parse_version(version)
+        if not tupla_ver:
+            return resultados
+
+        for cve_id, meta in cve_db.items():
+            for minimo, maximo in meta.get("affected_versions", []):
+                if minimo <= tupla_ver <= maximo:
+                    resultados.append({
+                        "cve": cve_id,
+                        "confirmed": False,
+                        "method": "version_match",
+                        "evidence": (
+                            f"Versión {version} dentro del rango afectado "
+                            f"{'.'.join(map(str, minimo))}–{'.'.join(map(str, maximo))}"
+                        ),
+                        "impact": meta["description"],
+                        "severity": meta["severity"],
+                        "cvss": meta["cvss"],
+                        "description": meta["description"],
+                        "mitigation": meta.get("mitigation"),
+                    })
+                    break
+
+        return resultados
+
+
+# =============================================================================
+# VERIFICADOR DE CVEs (FortiOS — mantenido de v1.x)
 # =============================================================================
 
 class CVEChecker:
@@ -862,9 +1295,9 @@ class ReportGenerator:
         Estructura del fichero:
           {
             "tool": "vamp-forticheck",
-            "version": "1.0",
+            "version": "2.0",
             "generated": "<ISO-8601>",
-            "summary": { ... métricas agregadas ... },
+            "summary": { ... métricas agregadas por fabricante ... },
             "results": [ ... un objeto por objetivo ... ]
           }
 
@@ -873,12 +1306,19 @@ class ReportGenerator:
         results : List[ScanResult]  — Lista de resultados del escáner
         ruta    : str               — Ruta del fichero de salida (.json)
         """
+        # Contar dispositivos por fabricante para el resumen
+        vendors_detectados: Dict[str, int] = {}
+        for r in results:
+            if r.vendor:
+                vendors_detectados[r.vendor] = vendors_detectados.get(r.vendor, 0) + 1
+
         datos = {
             "tool": "vamp-forticheck",
-            "version": "1.0",
+            "version": "2.0",
             "generated": datetime.now(timezone.utc).isoformat(),
             "summary": {
                 "total_objetivos": len(results),
+                "vendors_detectados": vendors_detectados,
                 "fortios_confirmados": sum(1 for r in results if r.is_fortios),
                 "cves_confirmados": sum(
                     1 for r in results for f in r.cve_findings if f.get("confirmed")
@@ -894,10 +1334,11 @@ class ReportGenerator:
         """
         Genera un informe HTML standalone con tema oscuro tipo cyberpunk.
 
-        El informe incluye:
+        El informe incluye (v2.0):
           · Tarjetas de métricas resumen en la parte superior
-          · Tabla principal con todos los objetivos y su nivel de riesgo
+          · Tabla principal con todos los objetivos, fabricante y nivel de riesgo
           · Badges de severidad con código de color por nivel
+          · Badges de fabricante con código de color por vendor
           · Pie de informe con fecha/hora de generación
 
         Parámetros
@@ -905,6 +1346,16 @@ class ReportGenerator:
         results : List[ScanResult]  — Lista de resultados del escáner
         ruta    : str               — Ruta del fichero de salida (.html)
         """
+        # Mapa de fabricante a clase CSS y etiqueta
+        _VENDOR_BADGE = {
+            "FortiOS":      ("vendor-fortios",    "FortiOS"),
+            "PAN-OS":       ("vendor-panos",      "PAN-OS"),
+            "Cisco-ASA":    ("vendor-cisco",      "Cisco ASA"),
+            "Cisco-IOS-XE": ("vendor-cisco",      "Cisco IOS-XE"),
+            "Check-Point":  ("vendor-checkpoint", "Check Point"),
+            "Juniper":      ("vendor-juniper",    "Juniper"),
+        }
+
         # Construir las filas de la tabla
         filas = ""
         for r in results:
@@ -912,10 +1363,13 @@ class ReportGenerator:
                 continue
             cves_confirmados = [f["cve"] for f in r.cve_findings if f.get("confirmed")]
             clase_fila = r.risk_level.lower()
+            vendor_clase, vendor_label = _VENDOR_BADGE.get(
+                r.vendor or "", ("vendor-unknown", r.vendor or "—")
+            )
             filas += f"""
             <tr class="fila-{clase_fila}">
                 <td><code>{r.target}</code></td>
-                <td>{"<span class='si'>SÍ</span>" if r.is_fortios else "<span class='no'>NO</span>"}</td>
+                <td><span class="badge {vendor_clase}">{vendor_label}</span></td>
                 <td>{r.detected_version or "—"}</td>
                 <td>{", ".join(cves_confirmados) if cves_confirmados else "—"}</td>
                 <td><span class="badge badge-{clase_fila}">{r.risk_level}</span></td>
@@ -924,9 +1378,10 @@ class ReportGenerator:
             </tr>"""
 
         # Tarjetas de métricas resumen
+        n_vendors = len({r.vendor for r in results if r.vendor})
         metricas = {
             "Objetivos": len([r for r in results if r.error != "OUT_OF_SCOPE"]),
-            "FortiOS Detectado": sum(1 for r in results if r.is_fortios),
+            "Fabricantes": n_vendors,
             "CVEs Confirmados": sum(1 for r in results for f in r.cve_findings if f.get("confirmed")),
             "Objetivos Críticos": sum(1 for r in results if r.risk_level == "CRITICAL"),
         }
@@ -961,21 +1416,27 @@ class ReportGenerator:
   .badge-medium{{background:#ffc800;color:#000}}
   .badge-low{{background:#0090ff;color:#fff}}
   .badge-info,.badge-unknown{{background:#333;color:#999}}
+  .vendor-fortios{{background:#7a0000;color:#ff8080}}
+  .vendor-panos{{background:#7a3a00;color:#ffa040}}
+  .vendor-cisco{{background:#004a7a;color:#80cfff}}
+  .vendor-checkpoint{{background:#4a007a;color:#cf80ff}}
+  .vendor-juniper{{background:#006a40;color:#80ffbf}}
+  .vendor-unknown{{background:#222;color:#888}}
   .si{{color:#00e676;font-weight:700}} .no{{color:#555}}
   .pie{{margin-top:20px;color:#333;font-size:.75em;border-top:1px solid #1e1e1e;padding-top:10px}}
   code{{background:#111;padding:1px 4px;border-radius:2px;font-size:.9em}}
 </style>
 </head>
 <body>
-<h1>&#9888; vamp-forticheck — Informe de Vulnerabilidades FortiOS</h1>
+<h1>&#9888; vamp-forticheck v2.0 — Informe Multi-Vendor Edge Device Scanner</h1>
 <p class="subtitulo">VampSecure Labs · VampSecure Studios · Solo para uso en auditorías autorizadas</p>
 <div class="metricas">{tarjetas}</div>
 <table>
-<tr><th>Objetivo</th><th>FortiOS</th><th>Versión</th><th>CVEs Confirmados</th><th>Riesgo</th><th>Score</th><th>Notas</th></tr>
+<tr><th>Objetivo</th><th>Fabricante</th><th>Versión</th><th>CVEs Confirmados</th><th>Riesgo</th><th>Score</th><th>Notas</th></tr>
 {filas}
 </table>
 <div class="pie">
-Generado por vamp-forticheck v1.0 · VampSecure Labs · VampSecure Studios · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+Generado por vamp-forticheck v2.0 · VampSecure Labs · VampSecure Studios · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
 </div>
 </body>
 </html>"""
@@ -1026,7 +1487,11 @@ class FortiScanner:
 
     async def _escanear_objetivo(self, objetivo: str, session: aiohttp.ClientSession) -> ScanResult:
         """
-        Ejecuta las tres fases de análisis para un objetivo individual.
+        Ejecuta las fases de análisis para un objetivo individual.
+
+        A partir de v2.0 el método detecta el fabricante del dispositivo y despacha
+        las sondas CVE al checker adecuado: CVEChecker para FortiOS (retrocompat. v1.x)
+        y MultiVendorCVEChecker para PAN-OS, Cisco, Check Point y Juniper.
 
         Parámetros
         ----------
@@ -1047,8 +1512,15 @@ class FortiScanner:
         url_base = self._normalizar_url(objetivo)
         tiempo_limite = aiohttp.ClientTimeout(total=self.args.timeout)
 
-        # ── Fase 1: Detección de versión y banner ──────────────────────────────
-        # Probamos /remote/login primero (SSL-VPN), luego /login (Admin UI), luego /
+        # Variables locales para capturar contenido y cabeceras de la sonda inicial
+        _contenido_inicial = ""
+        _cabeceras_iniciales: Dict = {}
+
+        # ── Fase 1: Detección de fabricante, versión y banner ─────────────────
+        # Probamos tres rutas ordenadas por cobertura de fabricante:
+        #   · /remote/login — SSL-VPN (FortiOS, ASA, PAN-OS)
+        #   · /login        — Admin UI general
+        #   · /             — Raíz (página de bienvenida o redirect)
         for ruta in ("/remote/login", "/login", "/"):
             try:
                 async with session.get(
@@ -1058,44 +1530,98 @@ class FortiScanner:
                     allow_redirects=True,
                 ) as r:
                     contenido = await r.text(errors="replace")
+                    cabeceras = dict(r.headers)
                     resultado.banner = r.headers.get("Server", "")
-                    resultado.is_fortios, resultado.detected_version = VersionDetector.detect(
-                        contenido, dict(r.headers)
-                    )
-                    # Si ya encontramos indicadores de FortiOS, no seguir probando rutas
-                    if resultado.is_fortios or resultado.detected_version:
+
+                    # Detección de fabricante (todos los vendors incluido FortiOS)
+                    vendor_detectado = VendorDetector.detect(contenido, cabeceras)
+                    if vendor_detectado:
+                        resultado.vendor = vendor_detectado
+                        if vendor_detectado == "FortiOS":
+                            resultado.is_fortios = True
+
+                    # Detección de versión FortiOS (específica — puede funcionar
+                    # incluso cuando el vendor no fue detectado por indicadores)
+                    is_forti, version_forti = VersionDetector.detect(contenido, cabeceras)
+                    if is_forti:
+                        resultado.is_fortios = True
+                        if not resultado.vendor:
+                            resultado.vendor = "FortiOS"
+                    if version_forti:
+                        resultado.detected_version = version_forti
+
+                    # Guardar contenido de la primera respuesta útil para Fase 2
+                    if not _contenido_inicial and (vendor_detectado or is_forti or resultado.detected_version):
+                        _contenido_inicial = contenido
+                        _cabeceras_iniciales = cabeceras
                         break
+
             except asyncio.TimeoutError:
                 resultado.error = f"Timeout en {ruta}"
-                # Continuar con la siguiente ruta — el timeout puede ser selectivo
             except Exception as e:
                 resultado.error = str(e)[:100]
 
-        # ── Fase 2: Verificación de CVEs (siempre, independiente de Fase 1) ────
-        # Las sondas se lanzan aunque no hayamos detectado FortiOS, por si el
-        # dispositivo oculta los indicadores pero tiene el CVE explotable.
-        verificador = CVEChecker(session, self.args.timeout)
+        # ── Fase 2: Verificación de CVEs (adaptativa por fabricante) ──────────
+        # Si se identificó un fabricante, se usan sondas específicas para él.
+        # Si no se pudo identificar, se lanzan igualmente las sondas FortiOS/generales
+        # por si el dispositivo oculta sus indicadores pero tiene el CVE explotable.
 
-        sondas = await asyncio.gather(
-            verificador.check_cve_2018_13379(url_base),
-            verificador.check_cve_2022_40684(url_base),
-            verificador.check_api_info_disclosure(url_base),
-            return_exceptions=True,
-        )
+        if resultado.vendor in ("FortiOS", None):
+            # Checker FortiOS (v1.x) — retrocompatibilidad + dispositivos sin vendor claro
+            verificador_forti = CVEChecker(session, self.args.timeout)
+            sondas_forti = await asyncio.gather(
+                verificador_forti.check_cve_2018_13379(url_base),
+                verificador_forti.check_cve_2022_40684(url_base),
+                verificador_forti.check_api_info_disclosure(url_base),
+                return_exceptions=True,
+            )
+            for sonda in sondas_forti:
+                if isinstance(sonda, dict):
+                    resultado.cve_findings.append(sonda)
+                    if sonda.get("confirmed") and not resultado.is_fortios:
+                        resultado.is_fortios = True
+                        resultado.vendor = "FortiOS"
 
-        for sonda in sondas:
-            if isinstance(sonda, dict):
-                resultado.cve_findings.append(sonda)
-                # Si alguna sonda confirma un CVE, el objetivo es FortiOS aunque Fase 1 no lo detectó
-                if sonda.get("confirmed") and not resultado.is_fortios:
-                    resultado.is_fortios = True
+            # CVEs por versión (FortiOS)
+            resultado.cve_findings.extend(
+                verificador_forti.check_version_cves(resultado.detected_version)
+            )
 
-        # Añadir findings basados en versión (sin sonda de red)
-        resultado.cve_findings.extend(verificador.check_version_cves(resultado.detected_version))
+        else:
+            # Checker multi-vendor — PAN-OS, Cisco-ASA, Cisco-IOS-XE, Check-Point, Juniper
+            mv_checker = MultiVendorCVEChecker(session, self.args.timeout)
+
+            # Sondas de red específicas por fabricante
+            sondas_mv: list = []
+            if resultado.vendor == "PAN-OS":
+                sondas_mv.append(mv_checker.check_panos_globalprotect_exposure(url_base))
+            elif resultado.vendor in ("Cisco-ASA",):
+                sondas_mv.append(mv_checker.check_cisco_asa_vpn_exposed(url_base))
+            elif resultado.vendor in ("Cisco-IOS-XE",):
+                sondas_mv.append(mv_checker.check_cisco_iosxe_webui_exposed(url_base))
+            elif resultado.vendor == "Check-Point":
+                sondas_mv.append(mv_checker.check_checkpoint_cve_2024_24919(url_base))
+            # Juniper: solo sondas por versión (no hay endpoints públicos genéricos)
+
+            if sondas_mv:
+                resultados_mv = await asyncio.gather(*sondas_mv, return_exceptions=True)
+                for sonda in resultados_mv:
+                    if isinstance(sonda, dict):
+                        resultado.cve_findings.append(sonda)
+
+            # CVEs por versión detectada (todos los vendors multi-vendor)
+            resultado.cve_findings.extend(
+                mv_checker.check_version_cves_vendor(
+                    resultado.vendor, resultado.detected_version
+                )
+            )
 
         # ── Fase 3: Análisis de exposición secundaria ──────────────────────────
-        # Solo tiene sentido si hay algo que analizar
-        if resultado.is_fortios or any(f.get("confirmed") for f in resultado.cve_findings):
+        # Solo para dispositivos identificados o con hallazgos confirmados
+        hay_hallazgos = resultado.is_fortios or (
+            resultado.vendor and any(f.get("confirmed") for f in resultado.cve_findings)
+        )
+        if hay_hallazgos:
             analizador = ExposureAnalyzer(session)
             resultado.exposure_vectors = await analizador.analyze(url_base, resultado.cve_findings)
 
@@ -1228,23 +1754,33 @@ def mostrar_tabla_resultados(results: List[ScanResult]):
     Las filas de objetivos fuera de scope se omiten para no contaminar
     el informe con entradas irrelevantes.
 
-    Columnas
-    --------
-    Objetivo · FortiOS · Versión · CVEs Confirmados · CVEs (ver.) · Riesgo · Score
+    Columnas (v2.0)
+    ---------------
+    Objetivo · Fabricante · Versión · CVEs Confirmados · CVEs (ver.) · Riesgo · Score
     """
     tabla = Table(
-        title="[bold red]Resultados del Escaneo FortiOS[/bold red]",
+        title="[bold red]Resultados del Escaneo Multi-Vendor Edge Devices[/bold red]",
         box=box.ROUNDED,
         border_style="red",
         show_lines=False,
     )
     tabla.add_column("Objetivo",       style="white",  no_wrap=True)
-    tabla.add_column("FortiOS",        justify="center", width=8)
+    tabla.add_column("Fabricante",     justify="center", width=14)
     tabla.add_column("Versión",        style="yellow", width=12)
     tabla.add_column("CVEs Confirm.",  style="red")
     tabla.add_column("CVEs (versión)", style="orange1")
     tabla.add_column("Riesgo",         justify="center", width=10)
     tabla.add_column("Score",          justify="right",  width=6)
+
+    # Colores por fabricante para identificación visual rápida
+    _VENDOR_STYLE = {
+        "FortiOS":      "[bold red]FortiOS[/bold red]",
+        "PAN-OS":       "[bold orange1]PAN-OS[/bold orange1]",
+        "Cisco-ASA":    "[bold yellow]Cisco ASA[/bold yellow]",
+        "Cisco-IOS-XE": "[bold yellow]Cisco IOS-XE[/bold yellow]",
+        "Check-Point":  "[bold magenta]Check Point[/bold magenta]",
+        "Juniper":      "[bold cyan]Juniper[/bold cyan]",
+    }
 
     for r in results:
         if r.error == "OUT_OF_SCOPE":
@@ -1252,9 +1788,11 @@ def mostrar_tabla_resultados(results: List[ScanResult]):
         confirmados  = [f["cve"] for f in r.cve_findings if f.get("confirmed")]
         por_version  = [f["cve"] for f in r.cve_findings if f.get("method") == "version_match"]
 
+        vendor_label = _VENDOR_STYLE.get(r.vendor or "", r.vendor or "[dim]Desconocido[/dim]")
+
         tabla.add_row(
             r.target,
-            "[bold green]SÍ[/bold green]" if r.is_fortios else "[dim]NO[/dim]",
+            vendor_label,
             r.detected_version or "—",
             ", ".join(confirmados) or "—",
             ", ".join(por_version) or "—",
@@ -1327,7 +1865,10 @@ def main():
     console.print(BANNER, style="bold red")
 
     parser = argparse.ArgumentParser(
-        description="vamp-forticheck — Escáner de Vulnerabilidades FortiOS (VampSecure Labs)",
+        description=(
+            "vamp-forticheck v2.0 — Escáner de Vulnerabilidades Multi-Vendor Edge Devices "
+            "(FortiOS · PAN-OS · Cisco ASA/IOS-XE · Check Point · Juniper) — VampSecure Labs"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Ejemplos:\n"
