@@ -307,6 +307,44 @@ JUNIPER_CVE_DB: Dict = {
     },
 }
 
+# Base de datos de vulnerabilidades F5 BIG-IP
+# Las sondas de red detectan exposición de TMUI e iControl REST.
+# Los CVEs de esta DB se usan solo como referencia; la confirmación es por sonda.
+F5_CVE_DB: Dict = {
+    "CVE-2020-5902": {
+        "description": "F5 BIG-IP TMUI — traversal de ruta no autenticado que permite lectura de ficheros sensibles y ejecución de código; explotación masiva documentada (CISA KEV)",
+        "cvss": 9.8,
+        "severity": "CRITICAL",
+        "component": "Traffic Management User Interface (TMUI)",
+        "affected_versions": [],  # confirmado por sonda de exposición TMUI
+        "mitigation": "Actualizar a BIG-IP 15.1.0.4 / 14.1.2.6 / 13.1.3.4 o superior; restringir TMUI a redes de gestión internas",
+    },
+    "CVE-2022-1388": {
+        "description": "F5 BIG-IP iControl REST — omisión de autenticación sin usuario que permite ejecutar comandos arbitrarios como root vía cabeceras HTTP especialmente construidas",
+        "cvss": 9.8,
+        "severity": "CRITICAL",
+        "component": "iControl REST API (/mgmt/)",
+        "affected_versions": [],  # confirmado por sonda de exposición iControl REST
+        "mitigation": "Actualizar a BIG-IP 16.1.2.2 / 15.1.5.1 / 14.1.4.6 / 13.1.5 o superior; deshabilitar acceso externo a iControl REST",
+    },
+    "CVE-2023-46747": {
+        "description": "F5 BIG-IP TMUI — omisión de autenticación vía HTTP request smuggling que permite RCE sin credenciales; encadenable con CVE-2023-46748 (CISA KEV)",
+        "cvss": 9.8,
+        "severity": "CRITICAL",
+        "component": "Traffic Management User Interface (TMUI)",
+        "affected_versions": [],  # confirmado por sonda de exposición TMUI
+        "mitigation": "Actualizar a BIG-IP 17.1.0.3 / 16.1.4.1 / 15.1.10 / 14.1.5.5 o superior; aplicar workaround F5 para TMUI",
+    },
+    "CVE-2023-46748": {
+        "description": "F5 BIG-IP Configuration Utility — inyección SQL autenticada que deriva en ejecución de comandos como root; se encadena habitualmente con CVE-2023-46747",
+        "cvss": 8.8,
+        "severity": "HIGH",
+        "component": "Configuration Utility",
+        "affected_versions": [],
+        "mitigation": "Actualizar a BIG-IP 17.1.0.3 / 16.1.4.1 / 15.1.10 o superior",
+    },
+}
+
 # Mapa global de CVE databases por vendor (excluye Fortinet que usa FORTIOS_CVE_DB)
 VENDOR_CVE_MAP: Dict[str, Dict] = {
     "PAN-OS":        PANOS_CVE_DB,
@@ -314,6 +352,7 @@ VENDOR_CVE_MAP: Dict[str, Dict] = {
     "Cisco-ASA":     CISCO_CVE_DB,
     "Check-Point":   CHECKPOINT_CVE_DB,
     "Juniper":       JUNIPER_CVE_DB,
+    "F5-BIG-IP":     F5_CVE_DB,
 }
 
 
@@ -577,6 +616,11 @@ class VendorDetector:
             "Juniper Networks", "Junos", "J-Web", "JUNOS",
             "Juniper SRX", "Juniper EX",
         ],
+        "F5-BIG-IP": [
+            "BIG-IP", "F5 Networks", "iControl", "tmui",
+            "big-ip", "bigip", "F5 BIG-IP", "Traffic Management",
+            "F5, Inc", "LTM", "GTM", "APM", "ASM",
+        ],
     }
 
     @classmethod
@@ -601,8 +645,8 @@ class MultiVendorCVEChecker:
     """
     Realiza sondas de red específicas para CVEs de dispositivos no-Fortinet.
 
-    Cubre PAN-OS, Cisco ASA/IOS-XE, Check Point y Juniper con el mismo
-    principio de diseño que CVEChecker (FortiOS): sondas no destructivas,
+    Cubre PAN-OS, Cisco ASA/IOS-XE, Check Point, Juniper y F5 BIG-IP con el
+    mismo principio de diseño que CVEChecker (FortiOS): sondas no destructivas,
     evidencia sin explotación real.
 
     Para CVEs con confirmación por versión (la mayoría de heap overflows y
@@ -732,6 +776,101 @@ class MultiVendorCVEChecker:
                         resultado["evidence"] = "HTTP 200 en /webui/ con contenido Cisco IOS-XE"
         except Exception:
             pass
+        return resultado
+
+    async def check_bigip_tmui_exposure(self, base_url: str) -> Dict:
+        """
+        Verifica si la Traffic Management User Interface (TMUI) de F5 BIG-IP
+        está accesible públicamente.
+
+        Un TMUI expuesto es la superficie de ataque de:
+          · CVE-2020-5902 (CVSS 9.8) — traversal de ruta → RCE sin auth
+          · CVE-2023-46747 (CVSS 9.8) — HTTP request smuggling → auth bypass → RCE
+
+        Sonda segura: GET /tmui/login.jsp — respuesta 200 con contenido BIG-IP
+        confirma la exposición sin intentar explotar ninguna vulnerabilidad.
+        """
+        resultado = {
+            "cve": "F5-BIGIP-TMUI-EXPOSURE",
+            "confirmed": False,
+            "method": "active_probe",
+            "evidence": None,
+            "impact": (
+                "TMUI F5 BIG-IP expuesto públicamente — superficie de ataque para "
+                "CVE-2020-5902 (RCE) y CVE-2023-46747 (auth bypass RCE, CVSS 9.8)"
+            ),
+            "severity": "CRITICAL",
+            "cvss": 9.8,
+            "description": "Traffic Management User Interface (TMUI) de F5 BIG-IP accesible sin restricción de red",
+        }
+        for ruta in ("/tmui/login.jsp", "/tmui/", "/tmui/tmui/login/welcome.jsp"):
+            try:
+                async with self.session.get(
+                    f"{base_url}{ruta}",
+                    timeout=self.to,
+                    allow_redirects=True,
+                    ssl=False,
+                ) as r:
+                    if r.status == 200:
+                        cuerpo = await r.text(errors="replace")
+                        if any(kw in cuerpo.lower() for kw in ("big-ip", "bigip", "f5", "tmui")):
+                            resultado["confirmed"] = True
+                            resultado["evidence"] = (
+                                f"HTTP 200 en {ruta} con contenido BIG-IP — "
+                                "TMUI expuesto; CVE-2020-5902 y CVE-2023-46747 aplicables"
+                            )
+                            return resultado
+                    elif r.status in (301, 302):
+                        resultado["evidence"] = f"HTTP {r.status} en {ruta} — redirección TMUI detectada"
+            except Exception:
+                pass
+        return resultado
+
+    async def check_bigip_icl_exposure(self, base_url: str) -> Dict:
+        """
+        Verifica si el endpoint iControl REST de F5 BIG-IP está accesible.
+
+        iControl REST expuesto amplifica el riesgo de CVE-2022-1388 (CVSS 9.8),
+        que permite omisión de autenticación mediante cabeceras HTTP manipuladas.
+
+        Sonda segura: GET /mgmt/shared/authn/login — una respuesta que no sea 404
+        confirma la exposición del endpoint. Un sistema no expuesto no debería
+        tener /mgmt/ accesible desde redes no administradas.
+        """
+        resultado = {
+            "cve": "CVE-2022-1388",
+            "confirmed": False,
+            "method": "active_probe",
+            "evidence": None,
+            "impact": (
+                "iControl REST API accesible — CVE-2022-1388 permite omisión de "
+                "autenticación completa y ejecución de comandos como root"
+            ),
+            "severity": "CRITICAL",
+            "cvss": 9.8,
+            "description": F5_CVE_DB["CVE-2022-1388"]["description"],
+        }
+        try:
+            async with self.session.get(
+                f"{base_url}/mgmt/shared/authn/login",
+                timeout=self.to,
+                allow_redirects=False,
+                ssl=False,
+            ) as r:
+                if r.status in (200, 401, 405):
+                    resultado["confirmed"] = True
+                    resultado["evidence"] = (
+                        f"HTTP {r.status} en /mgmt/shared/authn/login — "
+                        "iControl REST API expuesto; CVE-2022-1388 aplicable"
+                    )
+                elif r.status == 403:
+                    resultado["evidence"] = "HTTP 403 en /mgmt/ — acceso restringido pero endpoint existe"
+                else:
+                    resultado["evidence"] = f"HTTP {r.status} en /mgmt/"
+        except asyncio.TimeoutError:
+            resultado["evidence"] = "Timeout"
+        except Exception as e:
+            resultado["evidence"] = f"Error: {str(e)[:60]}"
         return resultado
 
     async def check_cisco_asa_vpn_exposed(self, base_url: str) -> Dict:
@@ -1354,6 +1493,7 @@ class ReportGenerator:
             "Cisco-IOS-XE": ("vendor-cisco",      "Cisco IOS-XE"),
             "Check-Point":  ("vendor-checkpoint", "Check Point"),
             "Juniper":      ("vendor-juniper",    "Juniper"),
+            "F5-BIG-IP":    ("vendor-f5",         "F5 BIG-IP"),
         }
 
         # Construir las filas de la tabla
@@ -1421,6 +1561,7 @@ class ReportGenerator:
   .vendor-cisco{{background:#004a7a;color:#80cfff}}
   .vendor-checkpoint{{background:#4a007a;color:#cf80ff}}
   .vendor-juniper{{background:#006a40;color:#80ffbf}}
+  .vendor-f5{{background:#006080;color:#80dfff}}
   .vendor-unknown{{background:#222;color:#888}}
   .si{{color:#00e676;font-weight:700}} .no{{color:#555}}
   .pie{{margin-top:20px;color:#333;font-size:.75em;border-top:1px solid #1e1e1e;padding-top:10px}}
@@ -1601,6 +1742,9 @@ class FortiScanner:
                 sondas_mv.append(mv_checker.check_cisco_iosxe_webui_exposed(url_base))
             elif resultado.vendor == "Check-Point":
                 sondas_mv.append(mv_checker.check_checkpoint_cve_2024_24919(url_base))
+            elif resultado.vendor == "F5-BIG-IP":
+                sondas_mv.append(mv_checker.check_bigip_tmui_exposure(url_base))
+                sondas_mv.append(mv_checker.check_bigip_icl_exposure(url_base))
             # Juniper: solo sondas por versión (no hay endpoints públicos genéricos)
 
             if sondas_mv:
@@ -1780,6 +1924,7 @@ def mostrar_tabla_resultados(results: List[ScanResult]):
         "Cisco-IOS-XE": "[bold yellow]Cisco IOS-XE[/bold yellow]",
         "Check-Point":  "[bold magenta]Check Point[/bold magenta]",
         "Juniper":      "[bold cyan]Juniper[/bold cyan]",
+        "F5-BIG-IP":    "[bold green]F5 BIG-IP[/bold green]",
     }
 
     for r in results:
@@ -1895,6 +2040,9 @@ def main():
     parser.add_argument("-v", "--verbose",     action="store_true",
                         help="Salida detallada")
 
+    from vampsec_report import add_report_args
+    add_report_args(parser)
+
     args = parser.parse_args()
 
     if not args.target and not args.input:
@@ -1926,6 +2074,21 @@ def main():
         ReportGenerator.to_html(resultados, args.html)
         console.print(f"[bold green][✓] Informe HTML guardado: {args.html}[/bold green]")
 
+    # Informes de cliente (formato unificado VSL)
+    if args.report_html or args.report_pdf:
+        from vampsec_report import VampSecReport, meta_from_args
+        meta      = meta_from_args(args, tool="vamp-forticheck", version=VERSION)
+        vsl_rep   = VampSecReport(meta, _findings_vsl(resultados))
+        if args.report_html:
+            vsl_rep.to_html_client(args.report_html)
+            console.print(f"[bold green][✓] Informe cliente HTML: {args.report_html}[/bold green]")
+        if args.report_pdf:
+            try:
+                vsl_rep.to_pdf(args.report_pdf)
+                console.print(f"[bold green][✓] Informe cliente PDF: {args.report_pdf}[/bold green]")
+            except RuntimeError as e:
+                console.print(f"[yellow][!] PDF no generado: {e}[/yellow]")
+
     # Resumen final
     confirmados  = sum(1 for r in resultados for f in r.cve_findings if f.get("confirmed"))
     criticos     = sum(1 for r in resultados if r.risk_level == "CRITICAL")
@@ -1938,6 +2101,75 @@ def main():
         f"{len(objetivos) - fuera_scope} objetivo(s) analizados"
         + (f" · {fuera_scope} fuera de scope" if fuera_scope else "")
     )
+
+
+# =============================================================================
+# CONVERSIÓN A FORMATO DE INFORME UNIFICADO VSL
+# =============================================================================
+
+def _findings_vsl(results: List[ScanResult]) -> List:
+    """
+    Convierte los ScanResult del escáner al formato Finding de vampsec_report.
+
+    Solo incluye hallazgos confirmados activamente o por versión. Los objetivos
+    fuera de scope y los errores sin hallazgos se omiten.
+    """
+    from vampsec_report import Finding as VSLFinding
+
+    findings = []
+    n = 0
+    for r in results:
+        if r.error == "OUT_OF_SCOPE":
+            continue
+        for f in r.cve_findings:
+            if not (f.get("confirmed") or f.get("method") == "version_match"):
+                continue
+            n += 1
+            cve_id = f.get("cve", "")
+            cvss   = f.get("cvss")
+            sev    = f.get("severity", "MEDIUM").upper()
+            # Normalizar severidades textuales a escala VSL
+            if sev not in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+                if cvss:
+                    if cvss >= 9.0:   sev = "CRITICAL"
+                    elif cvss >= 7.0: sev = "HIGH"
+                    elif cvss >= 4.0: sev = "MEDIUM"
+                    else:             sev = "LOW"
+                else:
+                    sev = "MEDIUM"
+
+            method_tag = "Confirmado activamente" if f.get("confirmed") else "Coincidencia por versión"
+            vendor_str = f" [{r.vendor}]" if r.vendor else ""
+            version_str = f" · Versión detectada: {r.detected_version}" if r.detected_version else ""
+
+            evidence = (
+                f"Método de detección: {method_tag}\n"
+                f"Objetivo{vendor_str}: {r.target}{version_str}\n"
+                + (f"Evidencia: {f.get('evidence', '')}" if f.get("evidence") else "")
+            )
+
+            refs = []
+            if cve_id and cve_id.startswith("CVE-"):
+                refs.append(f"https://nvd.nist.gov/vuln/detail/{cve_id}")
+
+            findings.append(VSLFinding(
+                id          = f"FTC-{n:03d}",
+                title       = (f.get("description") or cve_id or "Vulnerabilidad detectada")[:80],
+                severity    = sev,
+                description = f.get("description", f.get("impact", "Sin descripción disponible.")),
+                evidence    = evidence.strip(),
+                affected    = r.target,
+                remediation = (
+                    f.get("mitigation") or
+                    "Aplicar los parches del fabricante según la advisory oficial. "
+                    "Revisar la guía de hardening del dispositivo."
+                ),
+                cvss        = float(cvss) if cvss is not None else None,
+                cve         = cve_id if cve_id.startswith("CVE-") else None,
+                references  = refs,
+                tags        = [r.vendor or "edge-device", "network", "perimeter"],
+            ))
+    return findings
 
 
 if __name__ == "__main__":
