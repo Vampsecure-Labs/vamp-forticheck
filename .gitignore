@@ -5,29 +5,34 @@ __pycache__/
 .venv/
 venv/
 env/
+build/
+dist/
+*.egg-info/
 
-# Outputs (no versionar datos de clientes)
-report_*.json
-report_*.html
-*.json
-*.html
-scope.txt
-scope-*.txt
-
-# Secretos
+# Credenciales y secretos
 .env
 .env.*
 !.env.example
 *.key
 *.pem
-.rotated-secrets.txt
-secrets/
+*.p12
+*.pfx
+*.crt
 
-# macOS
+# Outputs generados
+*.html
+*.pdf
+*.json
+*.sarif
+*.csv
+*.log
+
+# Editores y sistema operativo
 .DS_Store
 ._*
-
-# IDEs
 .idea/
 .vscode/
-
+*.swp
+*.swo
+*~
+Thumbs.db
