@@ -168,6 +168,31 @@ FORTIOS_CVE_DB: Dict = {
         ],
         "mitigation": "Actualizar inmediatamente; deshabilitar SSL-VPN como mitigación temporal urgente",
     },
+    "CVE-2024-55591": {
+        "description": "FortiOS / FortiProxy — bypass de autenticación en Node.js websocket vía peticiones crafteadas a jsconsole; permite obtener privilegios de super-admin sin credenciales; activamente explotada en enero 2025 (CISA KEV)",
+        "cvss": 9.8,
+        "severity": "CRITICAL",
+        "component": "jsconsole (Node.js WebSocket)",
+        "affected_versions": [
+            ((7, 0, 0), (7, 0, 16)),
+            ((7, 2, 0), (7, 2, 12)),
+        ],
+        "mitigation": "Actualizar a FortiOS 7.0.17 / 7.2.13 o superior; deshabilitar jsconsole en producción",
+    },
+    "CVE-2025-32756": {
+        "description": "FortiOS SSL-VPN — desbordamiento de pila (stack-based overflow) pre-autenticado en el gateway SSL-VPN; permite ejecución remota de código; explotación activa confirmada por Fortinet en mayo 2025",
+        "cvss": 9.6,
+        "severity": "CRITICAL",
+        "component": "SSL-VPN",
+        "affected_versions": [
+            ((6, 4, 0), (6, 4, 15)),
+            ((7, 0, 0), (7, 0, 16)),
+            ((7, 2, 0), (7, 2, 12)),
+            ((7, 4, 0), (7, 4, 6)),
+            ((7, 6, 0), (7, 6, 1)),
+        ],
+        "mitigation": "Actualizar a FortiOS 7.0.17 / 7.2.13 / 7.4.7 / 7.6.2 o superior; deshabilitar SSL-VPN como mitigación temporal",
+    },
 }
 
 # =============================================================================
@@ -204,6 +229,34 @@ PANOS_CVE_DB: Dict = {
             ((11, 2, 0), (11, 2, 3)),
         ],
         "mitigation": "Actualizar a PAN-OS 10.1.12 / 10.2.13 / 11.0.6 / 11.1.5 / 11.2.4 o superior; restringir acceso a la interfaz de gestión por IP",
+    },
+    "CVE-2025-0108": {
+        "description": "Palo Alto PAN-OS — bypass de autenticación en la interfaz web de gestión mediante peticiones PHP manipuladas; permite a un atacante no autenticado invocar scripts PHP; CVSS 9.3; explotación activa confirmada en febrero 2025",
+        "cvss": 9.3,
+        "severity": "CRITICAL",
+        "component": "Management Web Interface (PHP)",
+        "affected_versions": [
+            ((10, 1, 0), (10, 1, 12)),
+            ((10, 2, 0), (10, 2, 13)),
+            ((11, 0, 0), (11, 0, 6)),
+            ((11, 1, 0), (11, 1, 5)),
+            ((11, 2, 0), (11, 2, 4)),
+        ],
+        "mitigation": "Actualizar a PAN-OS 10.1.13 / 10.2.14 / 11.0.7 / 11.1.6 / 11.2.5 o superior; restringir acceso a la interfaz de gestión a IPs de confianza",
+    },
+    "CVE-2025-0111": {
+        "description": "Palo Alto PAN-OS — lectura de ficheros arbitrarios sin autenticación en la interfaz web de gestión; combinado con CVE-2025-0108 permite leer claves privadas y configuración sensible",
+        "cvss": 7.1,
+        "severity": "HIGH",
+        "component": "Management Web Interface",
+        "affected_versions": [
+            ((10, 1, 0), (10, 1, 12)),
+            ((10, 2, 0), (10, 2, 13)),
+            ((11, 0, 0), (11, 0, 6)),
+            ((11, 1, 0), (11, 1, 5)),
+            ((11, 2, 0), (11, 2, 4)),
+        ],
+        "mitigation": "Misma mitigación que CVE-2025-0108: actualizar y restringir acceso a la interfaz de gestión",
     },
     "CVE-2020-2021": {
         "description": "Palo Alto PAN-OS — bypass de autenticación vía respuesta SAML manipulada; afecta cuando SAML SSO está habilitado; CVSS 10.0",
@@ -262,6 +315,26 @@ CISCO_CVE_DB: Dict = {
             ((9, 0, 0), (9, 18, 3)),
         ],
         "mitigation": "Actualizar a versión con parche; aplicar ACLs para limitar acceso al portal WebVPN",
+    },
+    "CVE-2025-20188": {
+        "description": "Cisco IOS XE Wireless LAN Controller — subida de ficheros arbitraria sin autenticación vía endpoint HTTPS con JWT hardcodeado; CVSS 10.0; permite escalada a root en el sistema subyacente",
+        "cvss": 10.0,
+        "severity": "CRITICAL",
+        "component": "IOS XE WLC (Wireless LAN Controller)",
+        "affected_versions": [
+            ((17, 0, 0), (17, 14, 99)),
+        ],
+        "mitigation": "Actualizar a IOS XE 17.15.1 o superior; deshabilitar la función Out-of-Band AP Image Download si no es necesaria",
+    },
+    "CVE-2025-20161": {
+        "description": "Cisco ASA / FTD — desbordamiento de buffer en el procesamiento de paquetes DTLS que puede causar denegación de servicio o ejecución remota de código en dispositivos con DTLS habilitado",
+        "cvss": 8.6,
+        "severity": "HIGH",
+        "component": "ASA / FTD DTLS",
+        "affected_versions": [
+            ((9, 12, 0), (9, 20, 3)),
+        ],
+        "mitigation": "Actualizar a ASA 9.20.4 o superior; deshabilitar DTLS si no es requerido por la política VPN",
     },
 }
 
