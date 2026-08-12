@@ -76,6 +76,7 @@ import aiohttp
 import argparse
 import json
 import ipaddress
+import os
 import sys
 import re
 from pathlib import Path
@@ -103,6 +104,13 @@ BANNER = r"""
      ─────────────────────────────────────────────────────────────────────────────────
      USO EXCLUSIVO EN AUDITORÍAS AUTORIZADAS · El uso no autorizado es ilegal
 """
+
+# Versión de la herramienta
+VERSION = "2.1"
+
+# Shodan — descubrimiento pre-escaneo de superficie de ataque global
+SHODAN_COUNT_URL  = "https://api.shodan.io/shodan/host/count"
+SHODAN_SEARCH_URL = "https://api.shodan.io/shodan/host/search"
 
 # =============================================================================
 # BASE DE DATOS DE CVEs FORTIOS
@@ -465,6 +473,8 @@ class ScanResult:
     error: Optional[str] = None
     # v2.0 — fabricante detectado: FortiOS / PAN-OS / Cisco-ASA / Cisco-IOS-XE / Check-Point / Juniper / Unknown
     vendor: Optional[str] = None
+    # v2.1 — exposición global Shodan para el vendor detectado (None si Shodan no activo)
+    shodan_global_count: Optional[int] = None
 
 
 # =============================================================================
@@ -1658,6 +1668,106 @@ Generado por vamp-forticheck v2.0 · VampSecure Labs · VampSecure Studios · {d
 
 
 # =============================================================================
+# DESCUBRIMIENTO SHODAN — SUPERFICIE DE ATAQUE GLOBAL POR VENDOR
+# =============================================================================
+
+class ShodanDiscovery:
+    """
+    Consulta Shodan para estimar la exposición global de dispositivos edge
+    por fabricante antes de iniciar el escaneo activo.
+
+    Permite responder "¿cuántos dispositivos de este tipo hay expuestos
+    en Internet?" — datos de contexto de inteligencia OSINT pasiva.
+    """
+
+    # Query Shodan por vendor (búsquedas probadas y precisas)
+    _VENDOR_QUERIES: Dict[str, str] = {
+        "FortiOS":       'product:"FortiGate" ssl:"FortiGate"',
+        "PAN-OS":        'product:"GlobalProtect Portal"',
+        "Cisco-ASA":     'product:"Cisco ASA VPN" port:443',
+        "Cisco-IOS-XE":  'http.title:"Cisco IOS XE Software" port:443',
+        "Check-Point":   'product:"Check Point SSL Network Extender"',
+        "Juniper":       'http.title:"Juniper Web Device Manager"',
+        "F5-BIG-IP":     'product:"BIG-IP" http.title:"BIG-IP"',
+    }
+
+    def __init__(self, api_key: str) -> None:
+        self._key = api_key
+
+    async def _count_vendor(
+        self,
+        session: aiohttp.ClientSession,
+        vendor: str,
+        query: str,
+    ) -> Tuple[str, int]:
+        """Consulta el endpoint /shodan/host/count y devuelve (vendor, total)."""
+        try:
+            async with session.get(
+                SHODAN_COUNT_URL,
+                params={"key": self._key, "query": query},
+                timeout=aiohttp.ClientTimeout(total=15),
+                ssl=True,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    return vendor, data.get("total", 0)
+        except Exception:
+            pass
+        return vendor, -1
+
+    async def discover_all(self) -> Dict[str, int]:
+        """
+        Ejecuta todos los conteos en paralelo.
+        Retorna dict {vendor: count}; count=-1 si falló la petición.
+        """
+        async with aiohttp.ClientSession(
+            headers={"User-Agent": f"VampSecureLabs-FortiCheck/{VERSION}"}
+        ) as session:
+            tasks = [
+                self._count_vendor(session, vendor, query)
+                for vendor, query in self._VENDOR_QUERIES.items()
+            ]
+            resultados = await asyncio.gather(*tasks)
+        return dict(resultados)
+
+    @staticmethod
+    def mostrar_tabla(counts: Dict[str, int]) -> None:
+        """Imprime tabla Rich con la exposición global por vendor."""
+        t = Table(
+            title="[bold cyan]Shodan — Superficie de Ataque Global (Pre-Escaneo)[/]",
+            border_style="cyan",
+            show_lines=True,
+        )
+        t.add_column("Vendor",    style="cyan", width=22)
+        t.add_column("Hosts expuestos", justify="right", width=18)
+        t.add_column("Nivel",     width=10)
+
+        for vendor, count in sorted(counts.items(), key=lambda x: -x[1] if x[1] >= 0 else 0):
+            if count < 0:
+                count_str = "[dim]error[/]"
+                nivel = "[dim]—[/]"
+            elif count >= 50000:
+                count_str = f"[bold red]{count:,}[/]"
+                nivel = "[bold red]CRÍTICO[/]"
+            elif count >= 10000:
+                count_str = f"[red]{count:,}[/]"
+                nivel = "[red]ALTO[/]"
+            elif count >= 1000:
+                count_str = f"[yellow]{count:,}[/]"
+                nivel = "[yellow]MEDIO[/]"
+            else:
+                count_str = f"[cyan]{count:,}[/]"
+                nivel = "[cyan]BAJO[/]"
+            t.add_row(vendor, count_str, nivel)
+
+        console.print(t)
+        console.print(
+            "[dim]Fuente: Shodan. Los datos pueden tener latencia de días. "
+            "Usar solo como orientación de contexto.[/]\n"
+        )
+
+
+# =============================================================================
 # ESCÁNER PRINCIPAL
 # =============================================================================
 
@@ -1690,8 +1800,13 @@ class FortiScanner:
         ----------
         args : argparse.Namespace  — Argumentos CLI parseados por main()
         """
-        self.args = args
+        self.args  = args
         self.scope = ScopeValidator(args.scope)
+        self.shodan_key: Optional[str] = (
+            getattr(args, "shodan_key", None) or os.environ.get("SHODAN_API_KEY")
+        )
+        # Tabla de exposición global por vendor (se rellena en run() si Shodan activo)
+        self._shodan_counts: Dict[str, int] = {}
 
     def _normalizar_url(self, objetivo: str) -> str:
         """Añade el esquema https:// si el objetivo no incluye protocolo."""
@@ -1906,10 +2021,9 @@ class FortiScanner:
         """
         Ejecuta el escaneo completo del lote de objetivos de forma asíncrona.
 
-        El Semaphore limita la concurrencia real a --concurrency objetivos
-        simultáneos, aunque asyncio.as_completed gestiona todos los awaitable
-        a la vez. Los resultados se devuelven en orden de finalización, no de
-        entrada, para maximizar el throughput.
+        Si --shodan-key está configurado, lanza primero una fase de descubrimiento
+        OSINT pasivo (sin tocar los objetivos) para obtener el contexto de superficie
+        de ataque global por vendor. Luego ejecuta el escaneo activo.
 
         Parámetros
         ----------
@@ -1919,6 +2033,14 @@ class FortiScanner:
         -------
         List[ScanResult]  — Resultados en orden de finalización
         """
+        # ── Fase 0: Descubrimiento Shodan (pre-escaneo, opcional) ────────────
+        if self.shodan_key:
+            console.print("\n[bold]>> Fase 0: descubrimiento Shodan — superficie global[/]\n")
+            shodan_disc = ShodanDiscovery(self.shodan_key)
+            with console.status("[cyan]Consultando Shodan para todos los vendors…[/]"):
+                self._shodan_counts = await shodan_disc.discover_all()
+            ShodanDiscovery.mostrar_tabla(self._shodan_counts)
+
         semaforo = asyncio.Semaphore(self.args.concurrency)
         # TCPConnector compartido: reutiliza conexiones y limita la apertura total de sockets
         conector = aiohttp.TCPConnector(ssl=False, limit=self.args.concurrency * 2)
@@ -1943,6 +2065,9 @@ class FortiScanner:
                 )
                 for coro in asyncio.as_completed([escanear_con_limite(o) for o in objetivos]):
                     r = await coro
+                    # Enriquecer con conteo Shodan del vendor detectado
+                    if r.vendor and self._shodan_counts:
+                        r.shodan_global_count = self._shodan_counts.get(r.vendor, None)
                     resultados.append(r)
                     progreso.advance(tarea_id)
 
@@ -2112,6 +2237,9 @@ def main():
                         help="Ruta del informe HTML de salida")
     parser.add_argument("-v", "--verbose",     action="store_true",
                         help="Salida detallada")
+    parser.add_argument("--shodan-key",        metavar="API_KEY",
+                        help="Clave API de Shodan (o variable SHODAN_API_KEY) para fase 0 de "
+                             "descubrimiento OSINT: exposición global por vendor antes del escaneo")
 
     from vampsec_report import add_report_args
     add_report_args(parser)
