@@ -95,18 +95,18 @@ console = Console()
 
 # Cabecera ASCII impresa al inicio de cada ejecución
 BANNER = r"""
-__   ___   __  __ ___  ___ ___ ___ _   _ ___ ___ _      _   ___ ___ 
+__   ___   __  __ ___  ___ ___ ___ _   _ ___ ___ _      _   ___ ___
 \ \ / /_\ |  \/  | _ \/ __| __/ __| | | | _ \ __| |    /_\ | _ ) __|
  \ V / _ \| |\/| |  _/\__ \ _| (__| |_| |   / _|| |__ / _ \| _ \__ \
   \_/_/ \_\_|  |_|_|  |___/___\___|\___/|_|_\___|____/_/ \_\___/___/
   by Antonio Hernandez "Belky" — VampSecure Studios
-  vamp-forticheck v2.0 · Multi-Vendor Edge Device Scanner
+  vamp-forticheck v1.2.0 · Multi-Vendor Edge Device Scanner
   ────────────────────────────────────────────────────────────────────────
   USO EXCLUSIVO EN AUDITORÍAS AUTORIZADAS · El uso no autorizado es ilegal
 """
 
 # Versión de la herramienta
-VERSION = "2.1"
+VERSION = "1.2.0"
 
 # Shodan — descubrimiento pre-escaneo de superficie de ataque global
 SHODAN_COUNT_URL  = "https://api.shodan.io/shodan/host/count"
@@ -1652,7 +1652,7 @@ class ReportGenerator:
 </style>
 </head>
 <body>
-<h1>&#9888; vamp-forticheck v2.0 — Informe Multi-Vendor Edge Device Scanner</h1>
+<h1>&#9888; vamp-forticheck v1.1.0 — Informe Multi-Vendor Edge Device Scanner</h1>
 <p class="subtitulo">VampSecure Labs · VampSecure Studios · Solo para uso en auditorías autorizadas</p>
 <div class="metricas">{tarjetas}</div>
 <table>
@@ -1660,11 +1660,311 @@ class ReportGenerator:
 {filas}
 </table>
 <div class="pie">
-Generado por vamp-forticheck v2.0 · VampSecure Labs · VampSecure Studios · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+Generado por vamp-forticheck v1.1.0 · VampSecure Labs · VampSecure Studios · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
 </div>
 </body>
 </html>"""
         Path(ruta).write_text(html, encoding="utf-8")
+
+
+# =============================================================================
+# FINGERPRINTING SNMP + SSH (v1.2.0)
+# =============================================================================
+
+# Comunidades SNMP probadas por defecto
+_SNMP_COMUNIDADES_DEFECTO = ("public", "private")
+
+# CVEs conocidos correlacionados con versiones SSH de appliances de red.
+# Clave: subcadena identificativa del banner SSH (insensible a mayúsculas).
+# Valor: lista de dicts con información del CVE.
+_SSH_CVE_DB: Dict[str, list] = {
+    "cisco-1.25": [
+        {
+            "cve":         "CVE-2018-15439",
+            "cvss":        9.8,
+            "severity":    "CRITICAL",
+            "description": "Cisco IOS XE — cuenta de servicio por defecto habilitada sin contraseña en versiones con SSH Cisco-1.25",
+            "mitigation":  "Actualizar Cisco IOS XE y deshabilitar cuentas de servicio no necesarias",
+        },
+    ],
+    "cisco-2.0": [
+        {
+            "cve":         "CVE-2021-1257",
+            "cvss":        8.8,
+            "severity":    "HIGH",
+            "description": "Cisco IOS XE Web UI — CSRF que permite ejecución de comandos IOS",
+            "mitigation":  "Actualizar Cisco IOS XE a la versión parcheada indicada en la advisory",
+        },
+    ],
+    "fortigate": [
+        {
+            "cve":         "CVE-2023-27997",
+            "cvss":        9.2,
+            "severity":    "CRITICAL",
+            "description": "FortiOS — el banner SSH FortiGate puede revelar versión vulnerable a heap overflow pre-autenticación (XORtigate)",
+            "mitigation":  "Actualizar FortiOS a versión 7.4.2+ / 7.2.5+ / 7.0.12+ según rama",
+        },
+    ],
+    "juniper": [
+        {
+            "cve":         "CVE-2019-0036",
+            "cvss":        7.5,
+            "severity":    "HIGH",
+            "description": "Juniper Junos — OpenSSH vulnerable a divulgación de información en versiones anteriores a 18.1R2",
+            "mitigation":  "Actualizar Juniper Junos a 18.1R2 o superior",
+        },
+    ],
+    "panos": [
+        {
+            "cve":         "CVE-2022-0028",
+            "cvss":        8.6,
+            "severity":    "HIGH",
+            "description": "PAN-OS — amplificación de DoS reflexivo mediante SSH en versiones anteriores al parche",
+            "mitigation":  "Aplicar parche PAN-OS según advisory PAN-SA-2022-0028",
+        },
+    ],
+    "checkpoint": [
+        {
+            "cve":         "CVE-2024-24919",
+            "cvss":        8.6,
+            "severity":    "CRITICAL",
+            "description": "Check Point Security Gateway — traversal de path que expone el hash del fichero shadow via SSH/VPN (2024)",
+            "mitigation":  "Instalar el hotfix indicado en sk182336 de Check Point",
+        },
+    ],
+}
+
+
+class SNMPProber:
+    """
+    Sonda SNMP v1/v2c mediante socket UDP sin librerías externas.
+
+    Construye manualmente un GetRequest PDU en codificación ASN.1/BER
+    y lo envía al puerto 161 del objetivo.  Si el agente SNMP responde,
+    extrae el valor de sysDescr (OID 1.3.6.1.2.1.1.1.0) que suele revelar
+    el fabricante, modelo y versión del dispositivo.
+    """
+
+    _PUERTO_SNMP = 161
+    _TIMEOUT     = 3.0   # segundos de espera de respuesta UDP
+
+    def _construir_get_request(self, community: str, request_id: int = 1) -> bytes:
+        """
+        Construye un GetRequest PDU SNMP v2c para el OID sysDescr.
+
+        Estructura ASN.1/BER:
+          Sequence
+            Integer    : versión = 1 (SNMP v2c)
+            OctetString: community
+            GetRequest (A0)
+              Integer  : request_id
+              Integer  : error_status = 0
+              Integer  : error_index  = 0
+              Sequence : VarBindList
+                Sequence : VarBind
+                  OID    : 1.3.6.1.2.1.1.1.0
+                  Null   : valor (vacío en la petición)
+        """
+        def _tlv(tag: int, valor: bytes) -> bytes:
+            """Codifica Tag-Length-Value en BER."""
+            lng = len(valor)
+            if lng < 0x80:
+                return bytes([tag, lng]) + valor
+            elif lng < 0x100:
+                return bytes([tag, 0x81, lng]) + valor
+            else:
+                return bytes([tag, 0x82, (lng >> 8) & 0xFF, lng & 0xFF]) + valor
+
+        def _int_ber(valor: int) -> bytes:
+            """Codifica un entero BER (simplificado para valores pequeños)."""
+            if valor == 0:
+                return b"\x02\x01\x00"
+            buf = []
+            v = valor
+            while v:
+                buf.append(v & 0xFF)
+                v >>= 8
+            buf.reverse()
+            # Añadir byte de signo si el bit más alto está a 1
+            if buf[0] & 0x80:
+                buf.insert(0, 0x00)
+            return _tlv(0x02, bytes(buf))
+
+        def _oid_ber(oid_str: str) -> bytes:
+            """Codifica un OID en BER. P. ej.: '1.3.6.1.2.1.1.1.0'."""
+            partes = [int(x) for x in oid_str.split(".")]
+            # Los dos primeros componentes se codifican juntos: X*40 + Y
+            encoded = [partes[0] * 40 + partes[1]]
+            for p in partes[2:]:
+                if p < 128:
+                    encoded.append(p)
+                else:
+                    # Codificación base-128 para valores ≥ 128
+                    octetos = []
+                    while p:
+                        octetos.insert(0, p & 0x7F)
+                        p >>= 7
+                    for j, o in enumerate(octetos):
+                        encoded.append(o | (0x80 if j < len(octetos) - 1 else 0x00))
+            return _tlv(0x06, bytes(encoded))
+
+        # OID sysDescr
+        oid_sysdescr = "1.3.6.1.2.1.1.1.0"
+        null         = b"\x05\x00"
+
+        varbind     = _tlv(0x30, _oid_ber(oid_sysdescr) + null)
+        varbindlist = _tlv(0x30, varbind)
+        get_pdu     = _tlv(
+            0xA0,   # GetRequest-PDU
+            _int_ber(request_id) + b"\x02\x01\x00\x02\x01\x00" + varbindlist,
+        )
+        community_enc = _tlv(0x04, community.encode("ascii", errors="replace"))
+        version_enc   = b"\x02\x01\x01"  # v2c = 1
+
+        mensaje = _tlv(0x30, version_enc + community_enc + get_pdu)
+        return mensaje
+
+    def _extraer_sysdescr(self, respuesta: bytes) -> str | None:
+        """
+        Extrae el valor de sysDescr de la respuesta SNMP.
+
+        Busca el patrón OctetString (tag 0x04) que sigue al OID sysDescr
+        en el VarBind de respuesta.  Devuelve None si no se puede extraer.
+        """
+        # Búsqueda heurística: localizar el OctetString de mayor longitud
+        # que aparece después del primer 0xA2 (GetResponse-PDU)
+        idx = respuesta.find(b"\xA2")
+        if idx < 0:
+            return None
+        segmento = respuesta[idx:]
+        i = 0
+        while i < len(segmento) - 2:
+            tag = segmento[i]
+            if tag == 0x04:   # OctetString
+                lng_byte = segmento[i + 1]
+                if lng_byte & 0x80:
+                    n_bytes = lng_byte & 0x7F
+                    if i + 1 + n_bytes + 1 >= len(segmento):
+                        break
+                    lng = int.from_bytes(segmento[i + 2:i + 2 + n_bytes], "big")
+                    inicio_val = i + 2 + n_bytes
+                else:
+                    lng = lng_byte
+                    inicio_val = i + 2
+                if lng > 3:
+                    try:
+                        return segmento[inicio_val:inicio_val + lng].decode("utf-8", errors="replace")
+                    except Exception:
+                        return None
+            i += 1
+        return None
+
+    def sondear(self, host: str, comunidades: tuple | None = None) -> Dict | None:
+        """
+        Envía GetRequest SNMP al host y devuelve un dict con los hallazgos,
+        o None si el host no responde a ninguna de las comunidades probadas.
+
+        Parámetros
+        ----------
+        host       : str   — IP o hostname del objetivo
+        comunidades: tuple — Comunidades a probar (default: 'public' y 'private')
+
+        Retorna
+        -------
+        dict con claves: community, sysdescr  — o None si no responde
+        """
+        import socket as _socket
+
+        if comunidades is None:
+            comunidades = _SNMP_COMUNIDADES_DEFECTO
+
+        for community in comunidades:
+            pdu = self._construir_get_request(community)
+            sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            sock.settimeout(self._TIMEOUT)
+            try:
+                sock.sendto(pdu, (host, self._PUERTO_SNMP))
+                datos, _ = sock.recvfrom(4096)
+                sysdescr = self._extraer_sysdescr(datos)
+                if sysdescr:
+                    return {"community": community, "sysdescr": sysdescr}
+                # Si responde pero sin sysDescr legible, registrar respuesta igualmente
+                return {"community": community, "sysdescr": f"(respuesta ilegible {len(datos)} bytes)"}
+            except _socket.timeout:
+                continue
+            except Exception:
+                continue
+            finally:
+                sock.close()
+        return None
+
+
+class SSHBannerGrabber:
+    """
+    Obtiene el banner SSH de un dispositivo conectando por TCP al puerto 22.
+
+    Lee los primeros 256 bytes de la conexión para extraer la cadena de
+    identificación SSH (RFC 4253), que suele tener la forma:
+      SSH-2.0-<software>-<version>
+
+    Correlaciona la versión detectada con la base de datos _SSH_CVE_DB
+    para emitir hallazgos si corresponde a un appliance de red vulnerable.
+    """
+
+    _PUERTO_SSH = 22
+    _TIMEOUT    = 5.0
+    _BYTES_LEER = 256
+
+    def obtener_banner(self, host: str) -> str | None:
+        """
+        Conecta al puerto 22 y lee el banner SSH.
+
+        Retorna la cadena del banner o None si no se puede conectar.
+        """
+        import socket as _socket
+
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        sock.settimeout(self._TIMEOUT)
+        try:
+            sock.connect((host, self._PUERTO_SSH))
+            datos = sock.recv(self._BYTES_LEER)
+            # El banner siempre empieza con "SSH-"
+            for linea in datos.split(b"\n"):
+                l = linea.strip()
+                if l.startswith(b"SSH-"):
+                    return l.decode("utf-8", errors="replace")
+            return datos.decode("utf-8", errors="replace").strip()
+        except Exception:
+            return None
+        finally:
+            sock.close()
+
+    def correlacionar_cves(self, banner: str) -> list:
+        """
+        Busca CVEs conocidos comparando el banner SSH con _SSH_CVE_DB.
+
+        Retorna una lista de dicts de CVEs que coinciden (puede ser vacía).
+        """
+        if not banner:
+            return []
+        banner_lower = banner.lower()
+        cves_encontrados = []
+        for patron, cves in _SSH_CVE_DB.items():
+            if patron in banner_lower:
+                cves_encontrados.extend(cves)
+        return cves_encontrados
+
+    def sondear(self, host: str) -> Dict | None:
+        """
+        Obtiene el banner y correlaciona CVEs.
+
+        Retorna dict con claves: banner, cves — o None si no hay banner.
+        """
+        banner = self.obtener_banner(host)
+        if not banner:
+            return None
+        cves = self.correlacionar_cves(banner)
+        return {"banner": banner, "cves": cves}
 
 
 # =============================================================================
@@ -1765,6 +2065,187 @@ class ShodanDiscovery:
             "[dim]Fuente: Shodan. Los datos pueden tener latencia de días. "
             "Usar solo como orientación de contexto.[/]\n"
         )
+
+
+# =============================================================================
+# Detección de versión expuesta en respuesta HTTP
+# =============================================================================
+
+def analizar_version_expuesta_http(
+    content: str,
+    headers: Dict,
+) -> Tuple[Optional[str], List[Dict]]:
+    """
+    Analiza la respuesta HTTP en busca de la versión de FortiOS/FortiGate
+    expuesta en cabeceras o en el cuerpo de la respuesta, y genera hallazgos
+    de seguridad si la detecta.
+
+    La exposición de la versión en respuestas públicas es por sí misma un
+    hallazgo de seguridad de nivel HIGH (facilita el fingerprinting al atacante),
+    e independientemente del nivel INFO informativo.
+
+    Si la versión detectada corresponde a una versión conocida como vulnerable
+    en FORTIOS_CVE_DB, se genera un hallazgo CRITICAL adicional por CVE.
+
+    Patrones de extracción
+    -----------------------
+    · Cabecera Server:  FortiGate/X.Y.Z, FortiOS/X.Y.Z, FortiProxy/X.Y.Z
+    · Cuerpo JSON:      "version":"X.Y.Z"  (API REST Fortinet)
+    · Cuerpo genérico:  ver:X.Y.Z, build:NNNNN
+    · HTML de login:    <input name="magic"> + loginVersion div, indicadores típicos
+                        del panel de administración y portal SSL-VPN de FortiOS
+
+    Parámetros
+    ----------
+    content : str   — Cuerpo de la respuesta HTTP
+    headers : Dict  — Cabeceras HTTP como diccionario (se accede a 'Server' etc.)
+
+    Retorna
+    -------
+    Tuple[Optional[str], List[Dict]]
+      - Optional[str]  → Versión extraída en formato 'X.Y.Z', o None si no detectada
+      - List[Dict]     → Lista de findings para añadir a cve_findings del ScanResult
+    """
+    findings: List[Dict] = []
+    version_detectada: Optional[str] = None
+    fuente_version: str = ""
+
+    # ── Patrón 1: Cabecera Server ─────────────────────────────────────────
+    # Formato: FortiGate/7.2.5, FortiOS/7.0.10, FortiProxy/7.2.1
+    server_header = headers.get("Server", headers.get("server", ""))
+    _RE_SERVER_FORTI = re.compile(
+        r'(?:FortiGate|FortiOS|FortiProxy)/(\d+\.\d+\.\d+)',
+        re.I,
+    )
+    m = _RE_SERVER_FORTI.search(server_header)
+    if m:
+        version_detectada = m.group(1)
+        fuente_version = f"Cabecera Server: {server_header!r}"
+
+    # ── Patrón 2: Cuerpo — API REST ("version":"X.Y.Z") ──────────────────
+    if not version_detectada:
+        _RE_JSON_VER = re.compile(r'"version"\s*:\s*"(\d+\.\d+\.\d+)"', re.I)
+        m = _RE_JSON_VER.search(content)
+        if m:
+            version_detectada = m.group(1)
+            fuente_version = f'Cuerpo JSON: "version":"{m.group(1)}"'
+
+    # ── Patrón 3: Cuerpo — ver:X.Y.Z ────────────────────────────────────
+    if not version_detectada:
+        _RE_VER_INLINE = re.compile(r'\bver\s*[:=]\s*["\']?(\d+\.\d+\.\d+)', re.I)
+        m = _RE_VER_INLINE.search(content)
+        if m:
+            version_detectada = m.group(1)
+            fuente_version = f'Cuerpo (ver:): ver={m.group(1)!r}'
+
+    # ── Patrón 4: Cuerpo — build:NNNNN (fallback — no es una versión X.Y.Z) ─
+    # Solo se registra la exposición del build si no se detectó versión exacta
+    build_detectado: Optional[str] = None
+    if not version_detectada:
+        _RE_BUILD = re.compile(r'\bbuild\s*[:=]?\s*(\d{4,5})\b', re.I)
+        m = _RE_BUILD.search(content)
+        if m:
+            build_detectado = m.group(1)
+            fuente_version = f'Cuerpo (build:): build={m.group(1)}'
+
+    # ── Patrón 5: HTML de login page ─────────────────────────────────────
+    # Indicadores: <input name="magic"> + loginVersion, fortigate-login, etc.
+    if not version_detectada:
+        _RE_LOGIN_VER = re.compile(
+            r'(?:loginVersion|fortiVersion|fgd-version)["\s:=>]+["\']?(\d+\.\d+\.\d+)',
+            re.I,
+        )
+        m = _RE_LOGIN_VER.search(content)
+        if m:
+            version_detectada = m.group(1)
+            fuente_version = f'HTML login (loginVersion/fortiVersion): {m.group(1)}'
+
+    # ── Generar hallazgos según lo detectado ──────────────────────────────
+
+    if version_detectada:
+        # INFO — versión detectada (informativo, siempre útil para el auditor)
+        findings.append({
+            "cve":       "INFO-VERSION",
+            "confirmed": False,
+            "method":    "http_version_exposure",
+            "evidence":  fuente_version,
+            "impact":    f"Versión detectada: FortiOS {version_detectada}",
+            "severity":  "INFO",
+            "cvss":      0.0,
+            "description": (
+                f"Se ha detectado la versión FortiOS {version_detectada} en la "
+                f"respuesta HTTP del dispositivo ({fuente_version}). "
+                "Esta información permite al atacante seleccionar exploits específicos "
+                "para la versión exacta del firmware sin necesidad de prueba activa."
+            ),
+        })
+
+        # HIGH — exposición de versión en respuesta HTTP pública
+        findings.append({
+            "cve":       "HIGH-VERSION-EXPOSURE",
+            "confirmed": True,
+            "method":    "http_version_exposure",
+            "evidence":  fuente_version,
+            "impact":    "Versión expuesta en respuesta HTTP — facilita fingerprinting",
+            "severity":  "HIGH",
+            "cvss":      7.5,
+            "description": (
+                f"El dispositivo expone la versión del firmware FortiOS ({version_detectada}) "
+                "en su respuesta HTTP. La exposición pública de la versión exacta del sistema "
+                "operativo es un hallazgo de seguridad per se: permite al atacante seleccionar "
+                "exploits conocidos, omite la fase de reconnaissance e incrementa el riesgo de "
+                "explotación dirigida. Remediación: ocultar o neutralizar la cabecera Server y "
+                "eliminar referencias de versión en el HTML de la interfaz web."
+            ),
+        })
+
+        # CRITICAL — si la versión cae en un rango vulnerable conocido
+        tupla_ver = VersionDetector.parse_version(version_detectada)
+        if tupla_ver:
+            for cve_id, meta in FORTIOS_CVE_DB.items():
+                for minimo, maximo in meta.get("affected_versions", []):
+                    if minimo <= tupla_ver <= maximo:
+                        findings.append({
+                            "cve":       cve_id,
+                            "confirmed": False,
+                            "method":    "http_version_exposure",
+                            "evidence":  (
+                                f"Versión {version_detectada} dentro del rango afectado "
+                                f"{'.'.join(map(str, minimo))}–{'.'.join(map(str, maximo))} "
+                                f"detectada en respuesta HTTP ({fuente_version})"
+                            ),
+                            "impact":    f"Versión potencialmente vulnerable a {cve_id}",
+                            "severity":  "CRITICAL",
+                            "cvss":      meta["cvss"],
+                            "description": (
+                                f"La versión FortiOS {version_detectada} detectada en la respuesta "
+                                f"HTTP es potencialmente vulnerable a {cve_id}. "
+                                f"{meta['description']}"
+                            ),
+                            "mitigation": meta.get("mitigation"),
+                        })
+                        break
+
+    elif build_detectado:
+        # Si solo se detectó el build (sin versión X.Y.Z), registrar exposición LOW
+        findings.append({
+            "cve":       "INFO-BUILD-EXPOSURE",
+            "confirmed": False,
+            "method":    "http_version_exposure",
+            "evidence":  fuente_version,
+            "impact":    f"Número de build expuesto: {build_detectado}",
+            "severity":  "LOW",
+            "cvss":      3.1,
+            "description": (
+                f"Se ha detectado el número de build FortiOS ({build_detectado}) en el "
+                "cuerpo de la respuesta HTTP. El número de build puede permitir estimar la "
+                "versión de firmware y seleccionar exploits específicos."
+            ),
+        })
+        # Actualizar version_detectada como cadena del build para retorno
+        version_detectada = f"build:{build_detectado}"
+
+    return version_detectada, findings
 
 
 # =============================================================================
@@ -1879,6 +2360,21 @@ class FortiScanner:
                     if version_forti:
                         resultado.detected_version = version_forti
 
+                    # Análisis de versión expuesta en respuesta HTTP (Fase 1.5)
+                    # Detecta versión en Server header, JSON API, HTML login y genera
+                    # hallazgos INFO/HIGH/CRITICAL si hay versión conocida vulnerable.
+                    if vendor_detectado == "FortiOS" or is_forti:
+                        _ver_http, _findings_http = analizar_version_expuesta_http(
+                            contenido, cabeceras
+                        )
+                        # Actualizar detected_version si Fase 1 no la extrajo
+                        if _ver_http and not resultado.detected_version:
+                            # Solo actualizar si es una versión X.Y.Z real (no build:XXXX)
+                            if not str(_ver_http).startswith("build:"):
+                                resultado.detected_version = _ver_http
+                        if _findings_http:
+                            resultado.cve_findings.extend(_findings_http)
+
                     # Guardar contenido de la primera respuesta útil para Fase 2
                     if not _contenido_inicial and (vendor_detectado or is_forti or resultado.detected_version):
                         _contenido_inicial = contenido
@@ -1956,6 +2452,122 @@ class FortiScanner:
         if hay_hallazgos:
             analizador = ExposureAnalyzer(session)
             resultado.exposure_vectors = await analizador.analyze(url_base, resultado.cve_findings)
+
+        # ── Fase 4: Fingerprinting SNMP + SSH (v1.2.0) ────────────────────────
+        # Extraer la dirección IP/hostname del objetivo para sondeos de red
+        from urllib.parse import urlparse as _urlparse
+        _parsed_url = _urlparse(url_base)
+        _host_snmp_ssh = _parsed_url.hostname or objetivo
+
+        # — SNMP: sondear comunidades configuradas ——————————————————————————
+        _raw_comunidades = getattr(self.args, "snmp_communities", None)
+        _comunidades_snmp: tuple = (
+            tuple(_raw_comunidades) if _raw_comunidades else _SNMP_COMUNIDADES_DEFECTO
+        )
+
+        snmp_prober = SNMPProber()
+        try:
+            # Ejecutar la operación bloqueante (UDP) en el executor del event loop
+            _loop = asyncio.get_event_loop()
+            _snmp_res = await _loop.run_in_executor(
+                None,
+                lambda: snmp_prober.sondear(_host_snmp_ssh, tuple(_comunidades_snmp)),
+            )
+        except Exception:
+            _snmp_res = None
+
+        if _snmp_res:
+            _sysdescr = _snmp_res.get("sysdescr", "")
+            _community = _snmp_res.get("community", "")
+            resultado.cve_findings.append({
+                "cve":         "SNMP_EXPOSED",
+                "cvss":        7.5,
+                "severity":    "HIGH",
+                "confirmed":   True,
+                "method":      "active_probe",
+                "description": (
+                    f"El dispositivo responde a SNMP en la comunidad '{_community}'. "
+                    f"sysDescr: {_sysdescr[:200]}"
+                ),
+                "evidence":    (
+                    f"Host: {_host_snmp_ssh}\n"
+                    f"Puerto: 161/UDP\n"
+                    f"Comunidad: {_community}\n"
+                    f"sysDescr: {_sysdescr[:500]}"
+                ),
+                "impact": (
+                    "SNMP con comunidad pública expuesto a internet permite enumerar "
+                    "información detallada del dispositivo (versión, interfaces, rutas) "
+                    "y en v1/v2c ejecutar escrituras si la comunidad 'private' acepta "
+                    "peticiones SET."
+                ),
+                "mitigation": (
+                    "Bloquear el puerto 161/UDP en el perímetro. Deshabilitar SNMP si "
+                    "no es necesario, o migrar a SNMPv3 con autenticación y cifrado."
+                ),
+            })
+            # Si el sysDescr revela la versión del fabricante, actualizar detected_version
+            if _sysdescr and not resultado.detected_version:
+                # Buscar patrones de versión comunes en el sysDescr
+                import re as _re_snmp
+                _m = _re_snmp.search(r"[Vv]ersion[:\s]+(\d+\.\d+[\.\d]*)", _sysdescr)
+                if _m:
+                    resultado.detected_version = _m.group(1)
+
+        # — SSH: banner grab + correlación CVE ——————————————————————————————
+        ssh_grabber = SSHBannerGrabber()
+        try:
+            _loop2 = asyncio.get_event_loop()
+            _ssh_res = await _loop2.run_in_executor(
+                None,
+                lambda: ssh_grabber.sondear(_host_snmp_ssh),
+            )
+        except Exception:
+            _ssh_res = None
+
+        if _ssh_res:
+            _ssh_banner = _ssh_res.get("banner", "")
+            _ssh_cves   = _ssh_res.get("cves", [])
+
+            # Hallazgo informativo del banner SSH (siempre)
+            resultado.cve_findings.append({
+                "cve":         "SSH_BANNER_EXPOSED",
+                "cvss":        3.1,
+                "severity":    "LOW",
+                "confirmed":   True,
+                "method":      "banner_grab",
+                "description": f"Banner SSH expuesto: {_ssh_banner}",
+                "evidence":    (
+                    f"Host: {_host_snmp_ssh}\n"
+                    f"Puerto: 22/TCP\n"
+                    f"Banner: {_ssh_banner}"
+                ),
+                "impact": (
+                    "El banner SSH revela software y versión del servidor, "
+                    "facilitando la identificación de versiones vulnerables."
+                ),
+                "mitigation": (
+                    "Configurar el servidor SSH para no exponer la versión exacta "
+                    "del software (en OpenSSH: VersionAddendum none)."
+                ),
+            })
+
+            # Hallazgos de CVEs correlacionados con la versión SSH
+            for cve_info in _ssh_cves:
+                resultado.cve_findings.append({
+                    "cve":         cve_info.get("cve", ""),
+                    "cvss":        cve_info.get("cvss", 7.0),
+                    "severity":    cve_info.get("severity", "HIGH"),
+                    "confirmed":   False,
+                    "method":      "version_match",
+                    "description": cve_info.get("description", ""),
+                    "evidence":    (
+                        f"Banner SSH: {_ssh_banner}\n"
+                        f"Patrón coincidente en base de datos CVE SSH"
+                    ),
+                    "impact":      cve_info.get("description", ""),
+                    "mitigation":  cve_info.get("mitigation", ""),
+                })
 
         # ── Mitigaciones detectadas ────────────────────────────────────────────
         if resultado.banner and any(waf in resultado.banner.lower() for waf in ("cloudflare", "nginx-waf")):
@@ -2209,7 +2821,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         description=(
-            "vamp-forticheck v2.0 — Escáner de Vulnerabilidades Multi-Vendor Edge Devices "
+            "vamp-forticheck v1.2.0 — Escáner de Vulnerabilidades Multi-Vendor Edge Devices "
             "(FortiOS · PAN-OS · Cisco ASA/IOS-XE · Check Point · Juniper) — VampSecure Labs"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2240,6 +2852,11 @@ def main():
     parser.add_argument("--shodan-key",        metavar="API_KEY",
                         help="Clave API de Shodan (o variable SHODAN_API_KEY) para fase 0 de "
                              "descubrimiento OSINT: exposición global por vendor antes del escaneo")
+    parser.add_argument("--snmp-community",    metavar="COMUNIDAD", nargs="+",
+                        dest="snmp_communities",
+                        help="Comunidades SNMP a probar en el puerto 161/UDP "
+                             "(por defecto: 'public' y 'private'). "
+                             "Si el dispositivo responde se genera hallazgo SNMP_EXPOSED (v1.2.0)")
 
     from vampsec_report import add_report_args
     add_report_args(parser)

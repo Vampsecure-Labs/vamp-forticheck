@@ -1,5 +1,6 @@
+<!-- © VampSecure Studios — VampSecure Labs Security Research Division -->
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0-crimson?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-1.1.0-crimson?style=flat-square" />
   <img src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/async-aiohttp-teal?style=flat-square" />
   <img src="https://img.shields.io/badge/VampSecure_Labs-Security_Research-8b0000?style=flat-square" />
@@ -51,6 +52,13 @@ pip install -r requirements.txt
 ---
 
 ## Installation
+
+
+```bash
+pip install vamp-forticheck
+# o con Homebrew:
+brew install vampsecure-labs/labs/vamp-forticheck
+```
 
 ```bash
 git clone https://github.com/belky-me/vamp-forticheck.git
@@ -166,3 +174,8 @@ Score = `CVSS_base × confidence_factor`. Confidence is 1.0 when a probe confirm
   © VampSecure Studios — VampSecure Labs Security Research Division<br/>
   For authorized security assessments only. Unauthorized use is prohibited.
 </p>
+
+---
+
+## Versión
+v1.1.0 — VampSecure Labs Security Research Division

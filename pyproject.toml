@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vamp-forticheck"
-version = "1.0.0"
-description = "Multi-vendor network appliance CVE scanner — FortiOS, PAN-OS, Cisco ASA/IOS-XE, Check Point, Juniper"
+version = "1.2.0"
+description = "Multi-vendor network appliance CVE scanner — FortiOS, PAN-OS, Cisco ASA/IOS-XE, Check Point, Juniper (HTTP version exposure + SNMP/SSH fingerprinting)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.8"
