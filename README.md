@@ -4,6 +4,7 @@
   <img src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/async-aiohttp-teal?style=flat-square" />
   <img src="https://img.shields.io/badge/VampSecure_Labs-Security_Research-8b0000?style=flat-square" />
+  <img src="https://github.com/Vampsecure-Labs/vamp-forticheck/actions/workflows/ci.yml/badge.svg" alt="CI"/>
 </p>
 
 <h1 align="center">vamp-forticheck</h1>
