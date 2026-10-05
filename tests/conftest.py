@@ -5,24 +5,18 @@ Proporciona HTML/cabeceras de FortiOS, ScanResult simulados y
 mocks de aiohttp.ClientSession para tests asíncronos.
 """
 
-import sys
 import os
-import asyncio
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, AsyncMock
+import sys
+from unittest.mock import MagicMock
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from vamp_forticheck import (
-    ScanResult,
-    VersionDetector,
     CVEChecker,
-    ScopeValidator,
-    FORTIOS_CVE_DB,
+    ScanResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures de HTML FortiOS

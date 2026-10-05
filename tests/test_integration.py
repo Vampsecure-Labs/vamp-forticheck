@@ -4,30 +4,26 @@ Tests de integración para vamp-forticheck.
 Simula respuestas HTTP de un FortiGate con aiohttp mock para verificar
 el flujo completo: detect → versión → CVE check → risk scoring.
 """
+from __future__ import annotations
 
-import sys
-import os
 import asyncio
+import os
+import sys
 from contextlib import asynccontextmanager
-from unittest.mock import MagicMock, AsyncMock, patch
-
-import pytest
+from unittest.mock import AsyncMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+
 from vamp_forticheck import (
     VersionDetector,
-    CVEChecker,
-    ScanResult,
-    FORTIOS_CVE_DB,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers: construir respuestas aiohttp mock
 # ---------------------------------------------------------------------------
 
-def _mock_respuesta_http(status: int, cuerpo: str, cabeceras: dict = None):
+def _mock_respuesta_http(status: int, cuerpo: str, cabeceras: dict | None = None):
     """Crea un contexto mock de aiohttp que devuelve una respuesta HTTP simulada."""
     respuesta = AsyncMock()
     respuesta.status = status

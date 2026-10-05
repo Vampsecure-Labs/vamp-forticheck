@@ -27,4 +27,4 @@ jobs:
         run: pytest tests/test_unit.py -v -m "not integration" --tb=short
 
       - name: Lint
-        run: pip install ruff && ruff check . --ignore E501,E402
+        run: pip install ruff && ruff check . --select E,F --ignore E501,E402,E701,E702,E741

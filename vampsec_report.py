@@ -43,14 +43,13 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # Mapas de severidad y paletas de color
 # ---------------------------------------------------------------------------
 
 # Orden de severidad de mayor a menor (usado en la ordenación de findings)
-SEVERITY_ORDER: Dict[str, int] = {
+SEVERITY_ORDER: dict[str, int] = {
     "CRITICAL": 0,
     "HIGH":     1,
     "MEDIUM":   2,
@@ -59,7 +58,7 @@ SEVERITY_ORDER: Dict[str, int] = {
 }
 
 # Colores tema claro/profesional para informe de cliente (hex CSS)
-_LIGHT_BG: Dict[str, str] = {
+_LIGHT_BG: dict[str, str] = {
     "CRITICAL": "#c0392b",
     "HIGH":     "#d35400",
     "MEDIUM":   "#d4ac0d",
@@ -69,7 +68,7 @@ _LIGHT_BG: Dict[str, str] = {
 }
 
 # Color del texto sobre el badge de cada severidad
-_LIGHT_TEXT: Dict[str, str] = {
+_LIGHT_TEXT: dict[str, str] = {
     "CRITICAL": "#ffffff",
     "HIGH":     "#ffffff",
     "MEDIUM":   "#2c3e50",
@@ -79,7 +78,7 @@ _LIGHT_TEXT: Dict[str, str] = {
 }
 
 # Tuplas RGB para fpdf2 (fondo badge)
-_PDF_BG: Dict[str, tuple] = {
+_PDF_BG: dict[str, tuple] = {
     "CRITICAL": (192, 57, 43),
     "HIGH":     (211, 84, 0),
     "MEDIUM":   (212, 172, 13),
@@ -89,7 +88,7 @@ _PDF_BG: Dict[str, tuple] = {
 }
 
 # Tuplas RGB para el texto sobre el badge PDF
-_PDF_FG: Dict[str, tuple] = {
+_PDF_FG: dict[str, tuple] = {
     "CRITICAL": (255, 255, 255),
     "HIGH":     (255, 255, 255),
     "MEDIUM":   (44, 62, 80),
@@ -133,10 +132,10 @@ class Finding:
     evidence    : str
     affected    : str
     remediation : str
-    cvss        : Optional[float] = None
-    cve         : Optional[str]   = None
-    references  : List[str]       = field(default_factory=list)
-    tags        : List[str]       = field(default_factory=list)
+    cvss        : float | None = None
+    cve         : str | None   = None
+    references  : list[str]       = field(default_factory=list)
+    tags        : list[str]       = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.severity = self.severity.upper()
@@ -213,15 +212,15 @@ class VampSecReport:
     COPYRIGHT      = "© VampSecure Studios. Todos los derechos reservados."
     CONFIDENTIAL   = "CONFIDENCIAL — Uso exclusivo del cliente destinatario."
 
-    def __init__(self, meta: ReportMeta, findings: List[Finding]) -> None:
+    def __init__(self, meta: ReportMeta, findings: list[Finding]) -> None:
         self.meta     = meta
         self.findings = sorted(findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
 
     # ── Estadísticas de resumen ────────────────────────────────────────────
 
-    def _stats(self) -> Dict[str, int]:
+    def _stats(self) -> dict[str, int]:
         """Devuelve el conteo de findings por severidad ordenado de mayor a menor."""
-        counts: Dict[str, int] = {s: 0 for s in SEVERITY_ORDER}
+        counts: dict[str, int] = {s: 0 for s in SEVERITY_ORDER}
         for f in self.findings:
             counts[f.severity] = counts.get(f.severity, 0) + 1
         return counts
@@ -535,7 +534,7 @@ class VampSecReport:
 </html>"""
         Path(path).write_text(html, encoding="utf-8")
 
-    def _barras_riesgo(self, stats: Dict[str, int]) -> str:
+    def _barras_riesgo(self, stats: dict[str, int]) -> str:
         total = sum(stats.values()) or 1
         partes = ['<div class="bars">']
         for sev, count in stats.items():
@@ -613,7 +612,7 @@ class VampSecReport:
                 f'  <div class="fld-val">{f.remediation}</div>'
                 f'</div>'
                 + (f'<div class="card-refs"><strong>Referencias:</strong> {refs_h}</div>' if refs_h else "")
-                + f'</div>'
+                + '</div>'
             )
         return "\n".join(partes)
 

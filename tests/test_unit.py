@@ -6,23 +6,16 @@ Cubre: VersionDetector.detect, VersionDetector.parse_version,
        puntuación de riesgo y rangos de versiones afectadas.
 """
 
-import sys
 import os
-import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
-
-import pytest
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from vamp_forticheck import (
-    VersionDetector,
-    CVEChecker,
-    ScopeValidator,
-    ScanResult,
     FORTIOS_CVE_DB,
+    ScopeValidator,
+    VersionDetector,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests de VersionDetector.detect
@@ -49,7 +42,7 @@ class TestVersionDetectorDetect:
 
     def test_detecta_por_cabecera_sslvpn(self):
         """Indicador SSL-VPN en cabecera → FortiOS detectado."""
-        _, version = VersionDetector.detect("", {"Server": "SSL-VPN FortiGate"})
+        _, _version = VersionDetector.detect("", {"Server": "SSL-VPN FortiGate"})
         es_forti, _ = VersionDetector.detect("", {"Server": "SSL-VPN FortiGate"})
         assert es_forti is True
 
@@ -182,7 +175,7 @@ class TestFortiOSCVEDB:
 
     def test_todos_tienen_severity(self):
         niveles_validos = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
-        for cve_id, meta in FORTIOS_CVE_DB.items():
+        for meta in FORTIOS_CVE_DB.values():
             assert meta.get("severity") in niveles_validos
 
     def test_cve_2022_40684_cvss_98(self):
@@ -193,7 +186,7 @@ class TestFortiOSCVEDB:
 
     def test_affected_versions_son_tuplas(self):
         """Los rangos de versiones deben ser pares de tuplas de 3 enteros."""
-        for cve_id, meta in FORTIOS_CVE_DB.items():
+        for meta in FORTIOS_CVE_DB.values():
             for minimo, maximo in meta.get("affected_versions", []):
                 assert len(minimo) == 3
                 assert len(maximo) == 3
