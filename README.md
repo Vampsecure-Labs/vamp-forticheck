@@ -156,6 +156,82 @@ Score = `CVSS_base × confidence_factor`. Confidence is 1.0 when a probe confirm
 
 ---
 
+## Sample Output
+
+```
+$ python vamp_forticheck.py -i targets.txt -s scope.txt --html report.html -v
+
+ vamp-forticheck v1.1.0 — VampSecure Labs
+ Targets: 6  |  Scope file: scope.txt  |  Concurrency: 10
+
+ [Phase 1] Passive detection
+  192.168.1.1    FortiOS 7.0.x   (HTTP header + login page artifact)
+  192.168.1.254  PAN-OS 10.1.x   (X-FRAME-OPTIONS + GP portal fingerprint)
+  10.0.0.1       Cisco IOS-XE    (HTTP/1.1 401 + Server: cisco-IOS)
+  10.0.0.254     Cisco ASA       (SSL VPN portal fingerprint)
+  10.10.0.1      F5 BIG-IP       (BigIP cookie + TMUI artifact)
+  10.10.0.2      Unknown         (no vendor fingerprint matched)
+
+ [Phase 2] CVE probes
+  192.168.1.1    CVE-2024-21762  confirmed     (pre-auth RCE — path traversal response)
+  192.168.1.1    CVE-2023-27997  confirmed     (heap overflow — SSL-VPN probe positive)
+  192.168.1.254  CVE-2024-3400   version-match (PAN-OS 10.1 < 10.1.13-h3)
+  10.0.0.1       CVE-2023-20198  confirmed     (HTTP server process — privilege escalation)
+  10.10.0.1      CVE-2023-46747  confirmed     (TMUI unauthenticated RCE — 401 bypass)
+
+ [Phase 3] Secondary exposure
+  192.168.1.1    Admin interface exposed on port 8443 (HTTPS)
+  10.0.0.254     REST API management endpoint /api/cli reachable
+  10.10.0.1      iControl REST accessible without authentication
+
+ ─────────────────────────────────────────────────────────────────────────────────
+ Host             Vendor      CVEs   Risk score    Level
+ 192.168.1.1      FortiOS     2      9.6           CRITICAL
+ 192.168.1.254    PAN-OS      1      6.0 (v-match) HIGH
+ 10.0.0.1         IOS-XE      1      9.6           CRITICAL
+ 10.0.0.254       Cisco ASA   0      0.0           INFO
+ 10.10.0.1        F5 BIG-IP   1      9.6           CRITICAL
+ 10.10.0.2        Unknown     0      0.0           INFO
+ ─────────────────────────────────────────────────────────────────────────────────
+ Summary: 3 CRITICAL · 1 HIGH · 0 MEDIUM · 2 INFO
+ HTML report: report.html  |  Exit code: 2
+```
+
+## Why vamp-forticheck vs. Shodan CVE lookup · Tenable Nessus · Rapid7 Nexpose
+
+| Capability | vamp-forticheck | Shodan CVE lookup | Tenable Nessus | Rapid7 Nexpose |
+|---|---|---|---|---|
+| Self-hosted — no cloud dependency | ✅ | ❌ cloud API | ❌ cloud/server | ❌ cloud/server |
+| Seven-vendor CVE coverage in one tool | ✅ | ⚠️ data only | ✅ | ✅ |
+| Scope enforcement via allowlist file | ✅ | ❌ | ✅ | ✅ |
+| Confidence-adjusted risk score (CVSS × factor) | ✅ | ❌ raw CVSS only | ✅ | ✅ |
+| Non-destructive — no authentication required | ✅ | ✅ passive | ❌ credentialed | ❌ credentialed |
+| VSL engagement HTML + PDF report | ✅ | ❌ | ⚠️ proprietary | ⚠️ proprietary |
+| CI/CD machine-readable exit codes | ✅ | ❌ | ❌ | ❌ |
+| Free, no per-scan licence fee | ✅ | ⚠️ API plan | ❌ paid | ❌ paid |
+
+- **Vendor-specific CVE intelligence**: generic vuln scanners apply the same probe logic to all hosts. `vamp-forticheck` uses vendor-specific HTTP artifacts, header patterns, and path-traversal conditions that produce confirmed findings rather than version-match guesses.
+- **Scope enforcement as a first-class feature**: the allowlist file (`-s scope.txt`) prevents accidental out-of-scope probing during a client engagement — a safeguard absent from ad-hoc Shodan lookups.
+- **Confidence-adjusted scoring**: a confirmed pre-auth RCE probe scores `CVSS × 1.0`; a version-only match scores `× 0.55`, preserving the distinction between what is proven and what is inferred.
+- **Zero cloud footprint**: no target IPs, banners, or findings leave the audit machine — critical when scanning client infrastructure under NDA.
+
+## Check Coverage
+
+| Check ID | Description | Standard | Severity |
+|---|---|---|---|
+| FTC-001 | CVE-2024-21762 — FortiOS SSL-VPN pre-auth remote code execution | NIST NVD, CVSS 9.8 | CRITICAL |
+| FTC-002 | CVE-2023-27997 — FortiOS SSL-VPN heap overflow | NIST NVD, CVSS 9.8 | CRITICAL |
+| FTC-003 | CVE-2024-3400 — PAN-OS GlobalProtect OS command injection | NIST NVD, CVSS 10.0 | CRITICAL |
+| FTC-004 | CVE-2023-20198 — Cisco IOS-XE Web UI privilege escalation | NIST NVD, CVSS 10.0 | CRITICAL |
+| FTC-005 | CVE-2016-6366 — Cisco ASA SNMP buffer overflow | NIST NVD, CVSS 8.1 | HIGH |
+| FTC-006 | CVE-2023-46747 — F5 BIG-IP TMUI unauthenticated RCE (iControl bypass) | NIST NVD, CVSS 9.8 | CRITICAL |
+| FTC-007 | CVE-2023-46748 — F5 BIG-IP authenticated SQL injection | NIST NVD, CVSS 8.8 | HIGH |
+| FTC-008 | CVE-2023-36845 — Juniper Junos pre-auth PHP environment variable injection | NIST NVD, CVSS 9.8 | CRITICAL |
+| FTC-009 | CVE-2024-21591 — Juniper Junos J-Web unauthenticated RCE | NIST NVD, CVSS 9.8 | CRITICAL |
+| FTC-010 | Admin/management interface reachable without authentication (secondary exposure) | CIS Critical Controls 7.1 | HIGH |
+| FTC-011 | REST/iControl API endpoint exposed without authentication | CIS Critical Controls 7.1 | HIGH |
+| FTC-012 | Vendor firmware version disclosed in HTTP response — enables targeted exploitation | CIS Critical Controls 7.7, CVSS 3.1 | MEDIUM |
+
 ## Part of VampSecure Labs Toolkit
 
 `vamp-forticheck` is part of the **VampSecure Labs Security Research Toolkit** — a collection of professional-grade, self-hosted security assessment tools.
