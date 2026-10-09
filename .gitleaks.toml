@@ -1,0 +1,23 @@
+# gitleaks configuration — VampSecure Labs
+# https://github.com/gitleaks/gitleaks
+
+title = "VampSecure Labs gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Example/demo tokens in documentation"
+regexes = [
+  # JWT examples with clearly fake signatures (EXAMPLE_SIG, FORGED_SIG, .example., .sig)
+  'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.(EXAMPLE_SIG|FORGED_SIG|EXAMPLE|FORGED)',
+  # Truncated JWTs used in CLI examples (end with ...)
+  'eyJ[A-Za-z0-9_-]+\.\.\.$',
+  # Fake JWT with .example. or .sig as payload/signature
+  'eyJ[A-Za-z0-9_-]+\.(example|sig|payload)\.(example|sig)',
+]
+paths = [
+  'README\.md',
+  'docs/.*',
+  '\.github/.*',
+]
